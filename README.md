@@ -5,24 +5,25 @@ J-Link EDU Reviver
 --------
 解压所有文件到同一目录中, 在命令行下执行
 
-EDUReViver -run blinky
-闪灯测试, 如果红灯闪烁12次, 说明设备能通过校验且网络通讯正常.
+EDUReViver -run blinky  
+闪灯测试, 如果红灯闪烁12次, 说明设备能通过校验且网络通讯正常.  
 
-EDUReViver -run revive
-去除多余的FlashDL之类的Features.
+EDUReViver -run revive  
+去除多余的FlashDL之类的Features.  
 
-EDUReViver -run swd
-打开SWD调试接口.
+EDUReViver -run swd  
+打开SWD调试接口.  
 
-EDUReViver -run to11
-转换V10到V11. 重新插拔后, 打开jlink commander会自动刷新固件.
+EDUReViver -run to11  
+转换V10到V11. 重新插拔后, 打开jlink commander会自动刷新固件.  
 
-EDUReViver -run to10
-转换V11到V10. 重新插拔后, 打开jlink commander会自动刷新固件.
+EDUReViver -run to10  
+转换V11到V10. 重新插拔后, 打开jlink commander会自动刷新固件.  
 
 支持设备
 --------
-J-Link V10/V11 所有版本, 目前为止所有固件.
+J-Link V10/V11 所有版本, 目前为止所有固件. 支持错误添加了Features的正版. 但不能是山寨版. 我加了一些在线检测避免滥用.
+一次只能支持一个设备, 支持配置为WinUSB驱动, 如果出现识别错误, 请在JLinkConfig配置程序中切换到Segger驱动.
 
 免责声明
 --------
@@ -40,20 +41,20 @@ Usage
 extract all files to same folder.
 execute these commands in command prompt.
 
-EDUReViver -run blinky
-this payload blinks red LED 12 times. this should used to test your usb and network connection is fine.
+EDUReViver -run blinky  
+this payload blinks red LED 12 times. this should used to test your usb and network connection is fine.  
+  
+EDUReViver -run revive  
+this payload remove all extra features.  
 
-EDUReViver -run revive
-this payload remove all extra features.
+EDUReViver -run swd  
+this payload unlocking SWD debug port on PCB.  
 
-EDUReViver -run swd
-this payload unlocking SWD debug port on PCB.
+EDUReViver -run to11  
+this payload turns your V10 to V11. unplug and replug usb cable, then flash new firmware in jlink commander.  
 
-EDUReViver -run to11
-this payload turns your V10 to V11. unplug and replug usb cable, then flash new firmware in jlink commander.
-
-EDUReViver -run to10
-this payload turns your V11 to V10. unplug and replug usb cable, then flash new firmware in jlink commander.
+EDUReViver -run to10  
+this payload turns your V11 to V10. unplug and replug usb cable, then flash new firmware in jlink commander.  
 
 Disclaimer
 ----------
