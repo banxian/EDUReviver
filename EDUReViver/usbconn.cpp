@@ -272,7 +272,7 @@ bool jlinkSendCommand(JlinkDevice* dev, void const* commandBuffer, uint32_t comm
 {
     // Winusb read pipe before write in other thread
     if (dev->isWinusb && resultHeaderLength) {
-        // ĞèÒªĞ´Èë²Å»ØÓ¦, °´ÀíËµ±ØĞëÒªĞÂÏÊÊı¾İ, Èç¹û»º³åÒÑÓĞÊı¾İ, ÄÇ¾Í²»ĞĞ
+        // éœ€è¦å†™å…¥æ‰å›åº”, æŒ‰ç†è¯´å¿…é¡»è¦æ–°é²œæ•°æ®, å¦‚æœç¼“å†²å·²æœ‰æ•°æ®, é‚£å°±ä¸è¡Œ
         ULONG writed = commandLength;
         if (!WinUsb_WritePipe(dev->interfaceHandle, dev->writePipe, (PUCHAR)commandBuffer, commandLength, &writed, NULL)) {
             return false;
@@ -293,7 +293,7 @@ bool jlinkSendCommand(JlinkDevice* dev, void const* commandBuffer, uint32_t comm
             return true;
         }
     } else {
-        // Ö»Ğ´winusb; »òÕß²»ÊÇwinusbµÄ
+        // åªå†™winusb; æˆ–è€…ä¸æ˜¯winusbçš„
         DWORD dummy = commandLength;
         if (!dev->isWinusb && !WriteFile(dev->writePipeFile, commandBuffer, commandLength, &dummy, NULL))
             return false;
@@ -392,7 +392,7 @@ bool jlinkDumpFullFirmware(JlinkDevice* dev, uint32_t addr, uint32_t size, void*
 {
     // is reset handler zero?
     bool usexor = false;
-    uint32_t handler; // 2017 03 10 ÒÔºóµÄ¹Ì¼ş¶Á³öÎª0»òÕßxorºó½á¹û
+    uint32_t handler; // 2017 03 10 ä»¥åçš„å›ºä»¶è¯»å‡ºä¸º0æˆ–è€…xoråç»“æœ
     if (jlinkCommandReadEmulatorMemory(dev, addr + 4, 4, &handler) && (handler >> 24) != (addr >> 24)) {
         usexor = true;
         uint32_t status = -1;

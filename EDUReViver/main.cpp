@@ -26,6 +26,7 @@ bool is_offical_bootloader(const void* btl);
 
 void printdigest(const char* name, const uint8_t* digest, size_t len);
 char* dump2hex(const uint8_t* buf, size_t len, char* hex);
+char* base64_encode(const uint8_t* value, size_t valuelen);
 
 #pragma pack(push, 1)
 struct cmd_fine_write_read
@@ -66,7 +67,7 @@ cmd_fine_write_read* assembly_cmd_payload(int* cmdlen, const void* payload, size
     cmd->cmd = 0xE0;
     cmd->writelen = newlen - 1 - 0xC; // 2C/38
     cmd->readlen = readlen;
-    memcpy((char*)cmd + payloadoffset, payload, payloadlen); // ·¢ËÍºó40B0´¦ÊÇÎÒÃÇ´úÂë
+    memcpy((char*)cmd + payloadoffset, payload, payloadlen); // å‘é€å40B0å¤„æ˜¯æˆ‘ä»¬ä»£ç 
     if (config->isSES) {
         cmd_fine_write_read_SES* ses = (cmd_fine_write_read_SES*)cmd;
         ses->regLR = config->sp + 0xC | 1;
@@ -75,7 +76,7 @@ cmd_fine_write_read* assembly_cmd_payload(int* cmdlen, const void* payload, size
         ses->R6 = config->R6;
     } else {
         cmd_fine_write_read_IAR* iar = (cmd_fine_write_read_IAR*)cmd;
-        iar->regLR = config->sp + 0x10 | 1; // Ö¸ÏòÇ¶Èë¿ªÍ·
+        iar->regLR = config->sp + 0x10 | 1; // æŒ‡å‘åµŒå…¥å¼€å¤´
     }
     return cmd;
 }
@@ -105,15 +106,25 @@ int main(int argc, char * argv[])
 {
     int mode = -1;
     char* payloadname = 0;
+    char* payloadopt = 0;
     if (argc >= 3) {
         for (int i = 1; i < argc; i++) {
             if (_stricmp(argv[i], "-run") == 0) {
                 payloadname = argv[++i];
+                continue;
+            }
+            if (payloadopt) {
+                payloadopt = (char*)realloc(payloadopt, strlen(payloadopt) + strlen(argv[i]) + 2);
+                char* tail = payloadopt + strlen(payloadopt);
+                *tail++ = ' ';
+                strcpy(tail, argv[i]);
+            } else {
+                payloadopt = _strdup(argv[i]);
             }
         }
     }
     if (payloadname == 0) {
-        printf("V10ReViver -run {blinky|revive|swd|to11|to10}\n");
+        printf("V10ReViver -run <blinky|revive|swd|to11|to10> [options]\n");
         return -1;
     }
 
@@ -165,13 +176,20 @@ int main(int argc, char * argv[])
     void* myapp = 0;
     int applen = 0;
     if (jlinkCommandReadUID(&devvec[0], &uidlen, &snuidbuf[4])) {
-        //printdigest("UID:", &snuidbuf[4], uidlen);
-        //printf("OTS Signature:\n");
-        //quickdump(0x5F00, (uint8_t*)otssign, 0x100);
-        char snstr[32], uidstr[65], signstr[513];
+        char* uidstr = base64_encode(&snuidbuf[4], uidlen);
+        char* signstr = base64_encode((uint8_t*)otssign, 0x100);
         char* reply = 0;
         size_t replylen = 0;
-        int reqret = request_payload_online(_itoa(sn, snstr, 10), dump2hex(&snuidbuf[4], uidlen, uidstr), dump2hex((uint8_t*)otssign, 0x100, signstr), payloadname, &reply, &replylen);
+        int reqret = request_payload_online(sn, uidstr, signstr, payloadname, payloadopt, &reply, &replylen);
+        if (payloadopt) {
+            free(payloadopt);
+        }
+        if (uidstr) {
+            free(uidstr);
+        }
+        if (signstr) {
+            free(signstr);
+        }
         if (reqret == 0 && replylen) {
             int otsmatched = *(int32_t*)reply;
             mode = *(int32_t*)(reply + 4);
@@ -194,6 +212,9 @@ int main(int argc, char * argv[])
             errprintf("UID signature mismatched!\n");
         }
     } else {
+        if (payloadopt) {
+            free(payloadopt);
+        }
         errprintf("Reading UID failed!\n");
         CLOSE_AND_EXIT(0);
     }
@@ -244,25 +265,25 @@ int main(int argc, char * argv[])
         free(myapp);
         CLOSE_AND_EXIT(0);
     }
-    // Ç°ÖÃ²½Öè: ×¼±¸³¬³¤payloadµÄÖ´ĞĞ»·¾³
+    // å‰ç½®æ­¥éª¤: å‡†å¤‡è¶…é•¿payloadçš„æ‰§è¡Œç¯å¢ƒ
     bool M0patched = false;
     int cmdlen;
-    uint32_t readed; // FINE²ÉÑù×Ö½ÚÊı, m0appÉèÖÃ
-    // remotebuf Ç°4×Ö½ÚÔÚÉè±¸»á±»Ìî³äreaded, Òò´Ë²»ÄÜ·Å´úÂë, 4+writebufºÍremotebuf-4¸÷¿ÉÒÔ·Å0x14´óĞ¡´úÂë
-    // ´Ë´¦´úÂëÒª×¢ÒâÖ´ĞĞÊ±ºòspÊÇ100840E0(ÊÇLRÄ©Î²), ÈçÓĞpush»áÊ×ÏÈÆÆ»µLRÎ»ÖÃ,ÔÙ¼ÌĞøÍùÇ°ÆÆ»µ¿ÉÄÜÆÆ»µ×ÔÉí
-    // SESµÄ´úÂë¾Ö²¿±äÁ¿readed»á¶îÍâÌî³ä+28¿ÕÏ¶, µ¼ÖÂµÚ¶ş¶ÎÒª²ğ·Ö³öÀ´Ò»¸öliteral·ÅÈëR4-R6ÇøÓò
+    uint32_t readed; // FINEé‡‡æ ·å­—èŠ‚æ•°, m0appè®¾ç½®
+    // remotebuf å‰4å­—èŠ‚åœ¨è®¾å¤‡ä¼šè¢«å¡«å……readed, å› æ­¤ä¸èƒ½æ”¾ä»£ç , 4+writebufå’Œremotebuf-4å„å¯ä»¥æ”¾0x14å¤§å°ä»£ç 
+    // æ­¤å¤„ä»£ç è¦æ³¨æ„æ‰§è¡Œæ—¶å€™spæ˜¯100840E0(æ˜¯LRæœ«å°¾), å¦‚æœ‰pushä¼šé¦–å…ˆç ´åLRä½ç½®,å†ç»§ç»­å¾€å‰ç ´åå¯èƒ½ç ´åè‡ªèº«
+    // SESçš„ä»£ç å±€éƒ¨å˜é‡readedä¼šé¢å¤–å¡«å……+28ç©ºéš™, å¯¼è‡´ç¬¬äºŒæ®µè¦æ‹†åˆ†å‡ºæ¥ä¸€ä¸ªliteralæ”¾å…¥R4-R6åŒºåŸŸ
     if (mode == pmM4Ret && (config->isSES == false || (config->cmdReg >= 4 && config->cmdReg <= 6))) {
-        // µ¥´ÎÒç³ö
+        // å•æ¬¡æº¢å‡º
         cmd_fine_write_read* m4rxcmd;
         if (config->isSES) {
-            // ĞèÒª¶îÍâµÄÖØ¶¨Î»
+            // éœ€è¦é¢å¤–çš„é‡å®šä½
             unsigned char m4rxret[0x30] = {
                 0x8C, 0xB0, 0x0A, 0x48, 0x4F, 0xF4, 0x00, 0x61, 0x05, 0x4A, 0x90, 0x47, 0x07, 0x48, 0x01, 0x30,
                 0x80, 0x47, 0x01, 0xE0, 0xFF, 0xFF, 0xFF, 0xFF, 0x0C, 0xB0, 0xDF, 0xF8, 0x08, 0xF0, 0x00, 0x00,
                 0xDB, 0x0E, 0x01, 0x1A, 0x19, 0x07, 0x01, 0x1A, 0xFF, 0xFF, 0xFF, 0xFF, 0x50, 0x00, 0x00, 0x20
             };
             *(uint32_t*)&m4rxret[0x20] = config->usbrx | 1;
-            *(uint32_t*)&m4rxret[0x24] = config->lr | 1; // Òª·µ»Ødispatchcmd
+            *(uint32_t*)&m4rxret[0x24] = config->lr | 1; // è¦è¿”å›dispatchcmd
             m4rxret[0x2] += config->cmdReg - 4;
             m4rxret[0xC] += config->cmdReg - 4;
             m4rxcmd = assembly_cmd_payload(&cmdlen, m4rxret, sizeof(m4rxret), config, 0);
@@ -274,28 +295,28 @@ int main(int argc, char * argv[])
                 0x50, 0x00, 0x00, 0x20, 0xDB, 0x0E, 0x01, 0x1A, 0x19, 0x07, 0x01, 0x1A 
             };
             *(uint32_t*)&m4rxret[0x24] = config->usbrx | 1;
-            *(uint32_t*)&m4rxret[0x28] = config->lr | 1; // Òª·µ»Ødispatchcmd
+            *(uint32_t*)&m4rxret[0x28] = config->lr | 1; // è¦è¿”å›dispatchcmd
             m4rxcmd = assembly_cmd_payload(&cmdlen, m4rxret, sizeof(m4rxret), config, 0);
         }
         jlinkSendCommand(&devvec[0], m4rxcmd, cmdlen, &readed, sizeof(readed));
         free(m4rxcmd);
     } else {
-        // Ë«´ÎÒç³ö
-        // PatcherÖ´ĞĞÊ±ºòĞŞ²¹M0´úÂë, ´Ë¿ÌM0ÕıÔÚ10000068Ö®¼ä²»¶ÏµÄÑ­»·, Òò´ËÎÒÃÇ²¹Ñ­»·Ö®ÍâµÄ¶«Î÷²»ĞèÒªÖØÆôM0
-        // ÒòÎªPatcher<=28, ËùÒÔ¼æÈİIARºÍSES¹Ì¼ş
+        // åŒæ¬¡æº¢å‡º
+        // Patcheræ‰§è¡Œæ—¶å€™ä¿®è¡¥M0ä»£ç , æ­¤åˆ»M0æ­£åœ¨10000068ä¹‹é—´ä¸æ–­çš„å¾ªç¯, å› æ­¤æˆ‘ä»¬è¡¥å¾ªç¯ä¹‹å¤–çš„ä¸œè¥¿ä¸éœ€è¦é‡å¯M0
+        // å› ä¸ºPatcher<=28, æ‰€ä»¥å…¼å®¹IARå’ŒSESå›ºä»¶
         unsigned char patcher[0x2C] = {
             0x06, 0x49, 0x44, 0xF2, 0x6D, 0x00, 0x08, 0x80, 0x04, 0x49, 0xE2, 0x31, 0x43, 0xF6, 0x03, 0x00,
             0x08, 0x80, 0x01, 0xE0, 0xFF, 0xFF, 0xFF, 0xFF, 0xDF, 0xF8, 0x04, 0xF0, 0x72, 0x00, 0x00, 0x10,
             0x19, 0x07, 0x01, 0x1A 
         };
-        *(uint32_t*)&patcher[0x20] = config->lr + 1; // µÚÒ»´ÎÒª·µ»Ødispatchcmd
+        *(uint32_t*)&patcher[0x20] = config->lr + 1; // ç¬¬ä¸€æ¬¡è¦è¿”å›dispatchcmd
         cmd_fine_write_read* patchercmd = assembly_cmd_payload(&cmdlen, patcher, sizeof(patcher), config, 0);
         jlinkSendCommand(&devvec[0], patchercmd, cmdlen, &readed, sizeof(readed));
         free(patchercmd);
         M0patched = true;
-        // ´ËÊ±´úÂë¿ÉÒÔÊ¹ÓÃÁ¬ĞøµÄ0x2C/0x28ÄÚÈİ, ÆäËû×¢ÒâÊÂÏîÍ¬ÉÏ
+        // æ­¤æ—¶ä»£ç å¯ä»¥ä½¿ç”¨è¿ç»­çš„0x2C/0x28å†…å®¹, å…¶ä»–æ³¨æ„äº‹é¡¹åŒä¸Š
         if (mode == pmM0Hold || mode == pmM0Boot) {
-            // ½ÓÊÕÆ÷Ä£Ê½
+            // æ¥æ”¶å™¨æ¨¡å¼
             cmd_fine_write_read* ldrcmd;
             if (mode == pmM0Hold) {
                 // usbresetrxm0: usbrx
@@ -322,7 +343,7 @@ int main(int argc, char * argv[])
             jlinkSendCommand(&devvec[0], ldrcmd, cmdlen, NULL, 0);
             free(ldrcmd);
         }
-        // SES¹Ì¼ş R4~R6ÎŞ¿ÉÓÃ¿Õ¼äÇé¿öµÄµÚ¶ş´ÎÒç³ö, ÎªÁË¼æÈİÎ´À´¹Ì¼ş
+        // SESå›ºä»¶ R4~R6æ— å¯ç”¨ç©ºé—´æƒ…å†µçš„ç¬¬äºŒæ¬¡æº¢å‡º, ä¸ºäº†å…¼å®¹æœªæ¥å›ºä»¶
         if (mode == pmM4Ret) {
             unsigned char m4rxret[0x24] = {
                 0x8C, 0xB0, 0x05, 0x48, 0x4F, 0xF4, 0x00, 0x61, 0x04, 0x4A, 0x90, 0x47, 0x02, 0x48, 0x01, 0x30,
@@ -330,30 +351,30 @@ int main(int argc, char * argv[])
                 0x19, 0x07, 0x01, 0x1A 
             };
             *(uint32_t*)&m4rxret[0x1C] = config->usbrx | 1;
-            *(uint32_t*)&m4rxret[0x20] = config->lr | 1; // Òª·µ»Ødispatchcmd
+            *(uint32_t*)&m4rxret[0x20] = config->lr | 1; // è¦è¿”å›dispatchcmd
             cmd_fine_write_read* m4rxcmd = assembly_cmd_payload(&cmdlen, m4rxret, sizeof(m4rxret), config, 0);
             jlinkSendCommand(&devvec[0], m4rxcmd, cmdlen, &readed, sizeof(readed));
             free(m4rxcmd);
         }
     }
-    // ·¢ËÍ²½Öè: ·¢ËÍ³¬³¤payload
-    // M4°æÔËĞĞ¿Õ¼ä¿ÉÒÔÊÇ²»·µ»ØµÄ³¬Ğ´Õ», ¿ÉÒÔÊÇĞ´20000048»òÕßsubµ½Ïß³Ì±¾µØÕ», M0°æÊÇÊÕµ½sram0´øvector
-    // M0AppËüÄÜ²»ÄÜcall flashÀïÃæµÄM4º¯Êı? ²»Ç£³¶µ½VFPÖ®ÀàµÄÖ¸Áî, Ó¦¸ÃÊÇ¿ÉÒÔµÄ.
+    // å‘é€æ­¥éª¤: å‘é€è¶…é•¿payload
+    // M4ç‰ˆè¿è¡Œç©ºé—´å¯ä»¥æ˜¯ä¸è¿”å›çš„è¶…å†™æ ˆ, å¯ä»¥æ˜¯å†™20000048æˆ–è€…subåˆ°çº¿ç¨‹æœ¬åœ°æ ˆ, M0ç‰ˆæ˜¯æ”¶åˆ°sram0å¸¦vector
+    // M0Appå®ƒèƒ½ä¸èƒ½call flashé‡Œé¢çš„M4å‡½æ•°? ä¸ç‰µæ‰¯åˆ°VFPä¹‹ç±»çš„æŒ‡ä»¤, åº”è¯¥æ˜¯å¯ä»¥çš„.
     if (mode == pmM4Reset) {
-        // ³¬Ğ´Ä£Ê½, ²»Ğè½ÓÊÕÆ÷²¿·Ö, ×îºóĞèÖØÆô
-        // ÌØÊâpayload: ²»´ø·µ»ØÖ¸Õë, µ¥2C/28 gap
+        // è¶…å†™æ¨¡å¼, ä¸éœ€æ¥æ”¶å™¨éƒ¨åˆ†, æœ€åéœ€é‡å¯
+        // ç‰¹æ®Špayload: ä¸å¸¦è¿”å›æŒ‡é’ˆ, å•2C/28 gap
         cmd_fine_write_read* m4loopcmd = assembly_cmd_payload(&cmdlen, myapp, applen, config, -0x18);
         jlinkSendCommand(&devvec[0], m4loopcmd, cmdlen, NULL, 0);
         free(m4loopcmd);
     } else {
-        // Ìî³äµ½800·¢³ö(ÒòÎª½ÓÊÕÆ÷Òª½ÓÂú800,¿ÉÒÔ¸Äloader±äÎª400/200)
+        // å¡«å……åˆ°800å‘å‡º(å› ä¸ºæ¥æ”¶å™¨è¦æ¥æ»¡800,å¯ä»¥æ”¹loaderå˜ä¸º400/200)
         int applenfull = 0x800;
         myapp = realloc(myapp, 0x800);
         memset((char*)myapp + applen, 0, applenfull - applen);
         jlinkSendCommand(&devvec[0], myapp, applenfull, NULL, 0);
     }
     free(myapp);
-    // ÇåÀí²½Öè, Èç¹û´ò¹ıM0²¹¶¡, Ôò»Ö¸´²¹¶¡, ÖØÆô°æ³ıÍâ, µÈËûÖØÆô
+    // æ¸…ç†æ­¥éª¤, å¦‚æœæ‰“è¿‡M0è¡¥ä¸, åˆ™æ¢å¤è¡¥ä¸, é‡å¯ç‰ˆé™¤å¤–, ç­‰ä»–é‡å¯
     if (M0patched && mode != pmM4Reset) {
         uint32_t oldif2;
         if (jlinkCommandSendSelectInterface(&devvec[0], oldif, &oldif2)) {
@@ -455,6 +476,56 @@ bool sha256(char* buff, size_t buflen, void* digest)
     return ok;
 }
 
+bool aes_256_cbc_encrypt(const uint8_t* key, const uint8_t* iv, uint8_t* buff, size_t buflen)
+{
+    bool ok = false;
+    HCRYPTPROV provider;
+    if (CryptAcquireContext(&provider, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)) {
+        HCRYPTHASH hash;
+        if (CryptCreateHash(provider, CALG_SHA_256, 0, 0, &hash)) {
+            if (CryptHashData(hash, (const BYTE*)key, 32, 0)) {
+                HCRYPTKEY cryptkey;
+                if (CryptDeriveKey(provider, CALG_AES_256, hash, 0, &cryptkey)) {
+                    if (CryptSetKeyParam(cryptkey, KP_IV, (const BYTE*)iv, 0)) {
+                        ok = true;
+                        for (size_t pos = 0; pos < buflen; pos+=32) {
+                            DWORD datlen = 32;
+                            if (!CryptEncrypt(cryptkey, NULL, pos == (buflen - 32), 0, &buff[pos], &datlen, 32)) {
+                                ok = false;
+                                break;
+                            }
+                        }
+                    }
+                    CryptDestroyKey(cryptkey);
+                }
+            }
+            CryptDestroyHash(hash);
+        }
+    }
+    CryptReleaseContext(provider, 0);
+    return ok;
+
+}
+
+char* base64_encode(const uint8_t* value, size_t valuelen)
+{
+    if (!value) {
+        return 0;
+    }
+    DWORD required = 0;
+    CryptBinaryToStringA(value, valuelen, CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, NULL, &required);
+    if (required) {
+        char* encoded = (char*)malloc(required);
+        if (CryptBinaryToStringA(value, valuelen, CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, encoded, &required)) {
+            return encoded;
+        } else {
+            free(encoded);
+            return 0;
+        }
+    }
+    return 0;
+}
+
 bool is_offical_bootloader(const void* btl)
 {
     bool matched = false;
@@ -487,13 +558,14 @@ uint32_t calc_sn_checksum(uint32_t sn)
         key[i] = sn >> i;
     }
 
+    //quickdump(0, src, sizeof(src));
     AES_CTX ctx;
     AES_set_key(&ctx, key, iv, AES_MODE_256);
     AES_cbc_encrypt(&ctx, (uint8_t*)src, (uint8_t*)src, sizeof(src));
+    //aes_256_cbc_encrypt(key, iv, src, sizeof(src));
+    //quickdump(0, src, sizeof(src));
 
-    //quickdump(0, src, 256);
     uint32_t chksum = crc32_rev(src, sizeof(src));
-    //printf("%08X\n", chksum);
     return chksum;
 }
 

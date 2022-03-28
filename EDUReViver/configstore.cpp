@@ -288,7 +288,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         return NULL;
     }
     uint32_t startaddr;
-    // SES¹Ì¼ş?
+    // SESå›ºä»¶?
     if (count == 2) {
         // LPC4300_Startup.s, no vfp
         if (insn[0].id == ARM_INS_BL && insn[1].id == ARM_INS_BL) {
@@ -381,7 +381,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
             }
         }
         cs_free(insn, count);
-        //dispatchcmdÊÇtaskmainµÄÒ»²¿·Ö
+        //dispatchcmdæ˜¯taskmainçš„ä¸€éƒ¨åˆ†
         //1A0197AC 000 98 B0                       SUB     SP, SP, #0x60
         //1A01B25A 060 80 47                       BLX     R0
         count = cs_disasm(handle, reader.buf_at_addr(maintaskaddr & ~1), 0x2000, (maintaskaddr & ~1), 0, &insn);
@@ -406,12 +406,12 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
                 // shift 2
                 if (insn[j-1].id == ARM_INS_LDR && prevarm->operands[0].reg == arm->operands[0].reg && 
                     prevarm->operands[1].type == ARM_OP_MEM && prevarm->operands[1].shift.type == ARM_SFT_LSL && prevarm->operands[1].shift.value == 2) {
-                        dispatchlr = insn[j+1].address;
+                        dispatchlr = (uint32_t)insn[j+1].address;
                         spd1 = spdvec[j];
                         int cmdreg = prevarm->operands[1].mem.index;
                         int tablereg = prevarm->operands[1].mem.base;
                         j--;
-                        // Ñ°ÕÒÕâ¶Ô×éºÏ
+                        // å¯»æ‰¾è¿™å¯¹ç»„åˆ
                         //ADDS    R6, #0x65
                         //UXTB    R0, R6
                         while (j--) {
@@ -478,7 +478,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
                     }
                 }
             }
-            // ³ÖĞø¸ú×ÙR4/R5/R6µÄMOVW/MOVT¶ÔÖµ
+            // æŒç»­è·Ÿè¸ªR4/R5/R6çš„MOVW/MOVTå¯¹å€¼
             if ((insn[j].id == ARM_INS_MOV || insn[j].id == ARM_INS_MOVW) && arm->operands[0].type == ARM_OP_REG && arm->operands[1].type == ARM_OP_IMM) {
                 switch(arm->operands[0].reg) {
                 case ARM_REG_R4:
@@ -515,7 +515,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         }
         uint32_t cmde0func = reader.read_uint32_addr(cmdtable + (cmdcnt - 1 - (0xFF - 0xE0)) * 4);
         printf("cmd_e0_fine_write_read: %08X\n", cmde0func);
-        // Ñ°ÕÒusbrxbuf±ÀÀ£µã, 5C
+        // å¯»æ‰¾usbrxbufå´©æºƒç‚¹, 5C
         count = cs_disasm(handle, reader.buf_at_addr(cmde0func & ~1), 0x70, (cmde0func & ~1), 0, &insn);
         calc_stack(insn, count, spdvec);
         int callcount = 0;
@@ -545,7 +545,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
                 }
             }
         }
-        // Ñ°ÕÒÖ¸ÕëÔ´
+        // å¯»æ‰¾æŒ‡é’ˆæº
         uint32_t usbdfuncs;
         for (size_t j = firstBL+1; j < firstBLX; j++) {
             cs_arm* arm = &insn[j].detail->arm;
@@ -558,7 +558,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
                 break;
             }
         }
-        // Ñ°ÕÒ×îºóµÄ·¢ËÍ
+        // å¯»æ‰¾æœ€åçš„å‘é€
         uint32_t usbtxbuf;
         for (size_t j = secondBLX+1; j < count; j++) {
             //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
@@ -579,7 +579,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         patcher_config item = {currstack, dispatchlr, usbrxbuf, true, rawCmdRegIdx, r4val, r5val, r6val};
         add_user_config(reader.get_banner(), &item);
     }
-    // IAR¹Ì¼ş?
+    // IARå›ºä»¶?
     if (count == 4) {
         if (insn[2].id == ARM_INS_LDR && insn[2].detail->arm.operands[1].reg == ARM_REG_PC) {
             startaddr = extract_ldr_pool(&insn[2]);
@@ -638,7 +638,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
                 while(j--) {
                     //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
                     cs_arm* arm = &insn[j].detail->arm;
-                    // ÏÈÕÒ[SP]ºÍ[SP+4]Ìî³ästackregºÍsizereg
+                    // å…ˆæ‰¾[SP]å’Œ[SP+4]å¡«å……stackregå’Œsizereg
                     // STR     R1, [SP,#0x10+StackSize]
                     // STR     R0, [SP,#0x10+pStack]
                     if (insn[j].id == ARM_INS_STR && arm->op_count == 2 && arm->operands[0].type == ARM_OP_REG && arm->operands[1].type == ARM_OP_MEM && arm->operands[1].mem.base == ARM_REG_SP) {
@@ -680,7 +680,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
             cs_close(&handle);
             return NULL;
         }
-        // Ñ°ÕÒdispatchusbcmd 110/10C
+        // å¯»æ‰¾dispatchusbcmd 110/10C
         count = cs_disasm(handle, reader.buf_at_addr(maintaskaddr & ~1), 0x120, (maintaskaddr & ~1), 0, &insn);
         calc_stack(insn, count, spdvec);
         step = 0;
@@ -705,7 +705,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
             }
         }
         cs_free(insn, count);
-        // Ñ°ÕÒusbcmdtable
+        // å¯»æ‰¾usbcmdtable
         count = cs_disasm(handle, reader.buf_at_addr(target & ~1), 0x120, (target & ~1), 0, &insn);
         calc_stack(insn, count, spdvec);
         uint32_t dispatchlr, cmdtable;
@@ -716,14 +716,14 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
             // BLX     R0
             if (insn[j].id == ARM_INS_BLX && arm->operands[0].type == ARM_OP_REG) {
                 spd2 = spdvec[j];
-                dispatchlr = insn[j].address + insn[j].size;
+                dispatchlr = (uint32_t)insn[j].address + insn[j].size;
                 step = 0;
                 int reg = ARM_REG_INVALID;
-                // Íù»ØÑ°ÕÒADD/LDR
+                // å¾€å›å¯»æ‰¾ADD/LDR
                 while (j--) {
                     //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
                     cs_arm* arm = &insn[j].detail->arm;
-                    // V10/V9»áÓĞ²»Í¬µÄÑ°Ö·Ö¸Áî
+                    // V10/V9ä¼šæœ‰ä¸åŒçš„å¯»å€æŒ‡ä»¤
                     // ADR.W   R0, g_usb_cmdtable
                     // LDR     R0, =g_cmdtable
                     if (step == 0 && 
@@ -762,7 +762,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         }
         uint32_t cmde0func = reader.read_uint32_addr(cmdtable + (cmdcnt - 1 - (0xFF - 0xE0)) * 4);
         printf("cmd_e0_fine_write_read: %08X\n", cmde0func);
-        // Ñ°ÕÒusbrxbuf±ÀÀ£µã, 4c
+        // å¯»æ‰¾usbrxbufå´©æºƒç‚¹, 4c
         count = cs_disasm(handle, reader.buf_at_addr(cmde0func & ~1), 0x60, (cmde0func & ~1), 0, &insn);
         calc_stack(insn, count, spdvec);
         uint32_t usbrxbuf = -1;
@@ -784,7 +784,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
                 }
             }
         }
-        // Ñ°ÕÒ×îºóµÄ·¢ËÍ
+        // å¯»æ‰¾æœ€åçš„å‘é€
         uint32_t usbtxbuf;
         for (size_t j = prevj + 1; j < count; j++) {
             //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
