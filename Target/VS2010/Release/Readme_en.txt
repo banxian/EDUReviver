@@ -15,6 +15,9 @@ this payload remove all extra features.
 EDUReViver -run swd
 this payload unlocking SWD debug port on PCB.
 
+EDUReViver -run swd off
+this payload locking SWD debug port on PCB again.
+
 EDUReViver -run to11
 this payload turns your V10 to V11. unplug and replug usb cable, then flash new firmware in jlink commander.
 

@@ -13,6 +13,9 @@ EDUReViver -run revive
 EDUReViver -run swd
 打开SWD调试接口.
 
+EDUReViver -run swd off
+关闭SWD调试接口.
+
 EDUReViver -run to11
 转换V10到V11. 重新插拔后, 打开jlink commander会自动刷新固件.
 
