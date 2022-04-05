@@ -35,8 +35,8 @@ J-Link V10/V11 所有版本, 目前为止所有固件. 支持错误添加了Feat
 
 Introduce
 ---------
-This utility support all version of JLinkV10/V11. support genius brick which added bad features.
-don't support illegal clones. some check applied on my utility to prevent running on clones.
+This utility support all version of JLinkV10/V11. support genuine jlink brick by bad features.
+doesn't support illegal clones. some check applied on my utility to prevent running on clones.
 turn off winusb mode in JlinkConfig if you meet usb communicate problems.
 
 Usage

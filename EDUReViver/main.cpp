@@ -8,7 +8,8 @@
 #include <setupapi.h>
 #include <time.h>
 #include <WinCrypt.h>
-#include <intrin.h>
+//#include <intrin.h>
+#include <io.h>
 #include "addon_func.h"
 #include "configstore.h"
 #include "crypto.h"
@@ -27,6 +28,8 @@ bool is_offical_bootloader(const void* btl);
 void printdigest(const char* name, const uint8_t* digest, size_t len);
 char* dump2hex(const uint8_t* buf, size_t len, char* hex);
 char* base64_encode(const uint8_t* value, size_t valuelen);
+void printfeatures(const uint8_t* flash);
+void printCRPlevel(uint32_t crp);
 
 #pragma pack(push, 1)
 struct cmd_fine_write_read
@@ -93,17 +96,26 @@ enum payloadmode {
     UnloadWinusb();\
     return code;
 
-void printmismatch(bool mismatch)
+void printmismatch(const char* name, bool mismatch)
 {
     if (mismatch) {
-        errprintf("mismatched!\n");
+        errprintf("%s mismatched!\n", name);
     } else {
-        printf("OK.\n");
+        printf("%s OK.\n", name);
     }
 }
 
 int main(int argc, char * argv[])
 {
+//#ifdef _DEBUG
+//    if (IsDebuggerPresent()) {
+//        STARTUPINFOA si = {sizeof(si)}; PROCESS_INFORMATION pi = {};
+//        if (CreateProcessA(NULL,
+//            "\"F:\\Program Files\\SystemTools\\ConEmu5\\ConEmu\\ConEmuC.exe\" /AUTOATTACH",
+//            NULL, NULL, FALSE, NORMAL_PRIORITY_CLASS, NULL, NULL, &si, &pi))
+//        { CloseHandle(pi.hProcess); CloseHandle(pi.hThread); }
+//    }
+//#endif
     int mode = -1;
     char* payloadname = 0;
     char* payloadopt = 0;
@@ -117,7 +129,7 @@ int main(int argc, char * argv[])
                 payloadopt = (char*)realloc(payloadopt, strlen(payloadopt) + strlen(argv[i]) + 2);
                 char* tail = payloadopt + strlen(payloadopt);
                 *tail++ = ' ';
-                strcpy(tail, argv[i]);
+                strcpy_s(tail, strlen(payloadopt) + 1, argv[i]);
             } else {
                 payloadopt = _strdup(argv[i]);
             }
@@ -141,10 +153,10 @@ int main(int argc, char * argv[])
     }
 
     uint8_t dataBuffer[512] = {0};
-    bool isv9 = false, isv10 = false;
+    bool isv10 = false;
     jlinkLoopReadFirmwareVersion(&devvec[0], dataBuffer);
     dataBuffer[0x70] = 0;
-    isv9 = strstr((const char*)dataBuffer, "V9") != 0;
+    //isv9 = strstr((const char*)dataBuffer, "V9") != 0;
     isv10 = (strstr((const char*)dataBuffer, "V10") != 0) || (strstr((const char*)dataBuffer, "V11") != 0);
     if (is_BTL_version((char*)dataBuffer)) {
         errprintf("Please quit bootloader mode\n");
@@ -162,14 +174,20 @@ int main(int argc, char * argv[])
     uint8_t snuidbuf[36];
     void* otssign;
     bool sncheckerror = true;
+    bool touchfeatures = _stricmp(payloadname, "revive") == 0;
+    bool touchsn = _stricmp(payloadname, "setsn") == 0;
+    bool touchcrp = _stricmp(payloadname, "swd") == 0;
     if (jlinkCommandReadOTS(&devvec[0], dataBuffer)) {
         sn = *(uint32_t*)dataBuffer;
         snchecksum = *(uint32_t*)(dataBuffer + 4);
         otssign = dataBuffer + 0x100;
         *(uint32_t*)snuidbuf = sn;
         sncheckerror = calc_sn_checksum(sn) != snchecksum;
-        printf("sn: %d, snchecksum ", sn);
-        printmismatch(sncheckerror);
+        printf("sn: %d, ", sn);
+        printmismatch("checksum", sncheckerror);
+        if (touchfeatures) {
+            printfeatures(&dataBuffer[0x20]);
+        }
     }
     uint32_t uidlen = 32;
     bool otssignok = false;
@@ -190,7 +208,7 @@ int main(int argc, char * argv[])
         if (signstr) {
             free(signstr);
         }
-        if (reqret == 0 && replylen) {
+        if (reqret == 0 && replylen >= 8) {
             int otsmatched = *(int32_t*)reply;
             mode = *(int32_t*)(reply + 4);
             applen = replylen - 8;
@@ -206,11 +224,7 @@ int main(int argc, char * argv[])
         if (reply) {
             free(reply);
         }
-        if (otssignok) {
-            printf("UID signature OK.\n");
-        } else {
-            errprintf("UID signature mismatched!\n");
-        }
+        printmismatch("UID signature", !otssignok);
     } else {
         if (payloadopt) {
             free(payloadopt);
@@ -223,6 +237,9 @@ int main(int argc, char * argv[])
     char* fwdump = (char*)malloc(dumpsize);
     if (jlinkDumpFullFirmware(&devvec[0], 0x1A000000, dumpsize, fwdump)) {
         bool bootloaderok = is_offical_bootloader(fwdump);
+        if (touchcrp) {
+            printCRPlevel(*(uint32_t*)&fwdump[0x2FC]);
+        }
         if (sn == -1 || sncheckerror || bootloaderok == false || otssignok == false) {
             errprintf("Detected clone.\n");
 #ifdef DENYCLONE
@@ -405,6 +422,25 @@ int main(int argc, char * argv[])
         }
         quickdump(0, dataBuffer, 0x70);
     }
+    if ((touchfeatures || touchsn) && jlinkCommandReadOTS(&devvec[0], dataBuffer)) {
+        if (touchsn) {
+            sn = *(uint32_t*)dataBuffer;
+            snchecksum = *(uint32_t*)(dataBuffer + 4);
+            sncheckerror = calc_sn_checksum(sn) != snchecksum;
+            printf("new sn: %d, ", sn);
+            printmismatch("checksum", sncheckerror);
+        }
+        if (touchfeatures) {
+            printfeatures(&dataBuffer[0x20]);
+        }
+    }
+    if (touchcrp) {
+        uint32_t crp;
+        if (jlinkDumpFullFirmware(&devvec[0], 0x1A0002FC, 4, &crp)) {
+            printCRPlevel(crp);
+        }
+    }
+
     freeJLinks(devvec);
     UnloadWinusb();
 #ifdef _DEBUG
@@ -469,9 +505,9 @@ bool sha256(char* buff, size_t buflen, void* digest)
                     ok = true;
                 }
             }
+            CryptDestroyHash(hash);
         }
     }
-    CryptDestroyHash(hash);
     CryptReleaseContext(provider, 0);
     return ok;
 }
@@ -481,30 +517,42 @@ bool aes_256_cbc_encrypt(const uint8_t* key, const uint8_t* iv, uint8_t* buff, s
     bool ok = false;
     HCRYPTPROV provider;
     if (CryptAcquireContext(&provider, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)) {
-        HCRYPTHASH hash;
-        if (CryptCreateHash(provider, CALG_SHA_256, 0, 0, &hash)) {
-            if (CryptHashData(hash, (const BYTE*)key, 32, 0)) {
-                HCRYPTKEY cryptkey;
-                if (CryptDeriveKey(provider, CALG_AES_256, hash, 0, &cryptkey)) {
-                    if (CryptSetKeyParam(cryptkey, KP_IV, (const BYTE*)iv, 0)) {
-                        ok = true;
-                        for (size_t pos = 0; pos < buflen; pos+=32) {
-                            DWORD datlen = 32;
-                            if (!CryptEncrypt(cryptkey, NULL, pos == (buflen - 32), 0, &buff[pos], &datlen, 32)) {
-                                ok = false;
-                                break;
-                            }
+        struct AESBLOB256 {
+            BLOBHEADER	header;
+            DWORD keysize;
+            BYTE key[32];
+        };
+        AESBLOB256 blob;
+        blob.header.bType = PLAINTEXTKEYBLOB;
+        blob.header.bVersion = CUR_BLOB_VERSION;
+        blob.header.reserved = 0;
+        blob.header.aiKeyAlg = CALG_AES_256;
+        blob.keysize = 32;
+        memcpy(blob.key, key, 32);
+        HCRYPTKEY cryptkey;
+        if (CryptImportKey(provider, (BYTE*)&blob, sizeof(blob), NULL, 0, &cryptkey)) {
+            if (CryptSetKeyParam(cryptkey, KP_IV, (const BYTE*)iv, 0)) {
+                DWORD mode = CRYPT_MODE_CBC;
+                if (CryptSetKeyParam(cryptkey, KP_MODE, (BYTE *)&mode, 0)) {
+                    DWORD datlen = buflen;
+                    if (CryptEncrypt(cryptkey, NULL, TRUE, 0, NULL, &datlen, 0)){
+                        size_t dstlen = datlen; // append 0x10 extra
+                        BYTE* dst = (BYTE*)malloc(dstlen);
+                        memcpy(dst, buff, buflen);
+                        datlen = buflen;
+                        if (CryptEncrypt(cryptkey, NULL, TRUE, 0, dst, &datlen, dstlen)){
+                            ok = true;
+                            memcpy(buff, dst, buflen);
                         }
+                        free(dst);
                     }
-                    CryptDestroyKey(cryptkey);
                 }
             }
-            CryptDestroyHash(hash);
+            CryptDestroyKey(cryptkey);
         }
     }
     CryptReleaseContext(provider, 0);
     return ok;
-
 }
 
 char* base64_encode(const uint8_t* value, size_t valuelen)
@@ -558,12 +606,9 @@ uint32_t calc_sn_checksum(uint32_t sn)
         key[i] = sn >> i;
     }
 
-    //quickdump(0, src, sizeof(src));
-    AES_CTX ctx;
-    AES_set_key(&ctx, key, iv, AES_MODE_256);
-    AES_cbc_encrypt(&ctx, (uint8_t*)src, (uint8_t*)src, sizeof(src));
-    //aes_256_cbc_encrypt(key, iv, src, sizeof(src));
-    //quickdump(0, src, sizeof(src));
+    if (!aes_256_cbc_encrypt(key, iv, src, sizeof(src))) {
+        errprintf("Wincrypt error on your system, can't verify sn checksum!\nPlease make a bugreport on github!\n");
+    }
 
     uint32_t chksum = crc32_rev(src, sizeof(src));
     return chksum;
@@ -608,4 +653,57 @@ char* dump2hex(const uint8_t* buf, size_t len, char* hex)
     }
     hex[len*2] = 0;
     return hex;
+}
+
+void printfeatures(const uint8_t* flash)
+{
+    printf("Features: ");
+    const uint8_t* str = flash;
+    bool oldinff = (*flash == 0xFF || *flash == 0);
+    flash++;
+    bool first = true;
+    for (int i = 1; i < 0x80; i++) {
+        bool inff = (*flash == 0xFF || *flash == 0);
+        if (oldinff == false && inff) {
+            if (first == false) {
+                printf(", ");
+            }
+            fwrite(str, flash - str, 1, stdout);
+            first = false;
+        }
+        if (oldinff && inff == false) {
+            str = flash;
+        }
+        oldinff = inff;
+        flash++;
+    }
+    if (oldinff == false) {
+        fwrite(str, flash - str, 1, stdout);
+    }
+    printf("\n");
+}
+
+void printCRPlevel(uint32_t crp)
+{
+    switch (crp)
+    {
+    case 0xFFFFFFFF:
+        printf("NO CRP\n");
+        break;
+    case 0x12345678:
+        printf("CRP1\n");
+        break;
+    case 0x87654321:
+        printf("CRP2\n");
+        break;
+    case 0x43218765:
+        printf("CRP3\n");
+        break;
+    case 0x4E697370:
+        printf("NO ISP\n");
+        break;
+    default:
+        printf("%08X\n", crp);
+        break;
+    }
 }

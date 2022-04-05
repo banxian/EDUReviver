@@ -104,7 +104,7 @@ bool getWinUSBLinks(JLinkDevVec& vec, const GUID* guid)
 
         WINUSB_INTERFACE_HANDLE winusbHandle;
         if (!WinUsb_Initialize(deviceFile, &winusbHandle)) {
-            printf("Failed to invoke WinUsb_Initialize, last error %d\n", GetLastError());
+            printf("Failed to invoke WinUsb_Initialize, last error %lu\n", GetLastError());
             CloseHandle(deviceFile);
             continue;
             //return false;
@@ -112,7 +112,7 @@ bool getWinUSBLinks(JLinkDevVec& vec, const GUID* guid)
         uint8_t desc[0x200];
         ULONG desclen = 0x200;
         if (!WinUsb_GetDescriptor(winusbHandle, USB_CONFIGURATION_DESCRIPTOR_TYPE, 0, 0, desc, desclen, &desclen)) {
-            printf("Failed to invoke WinUsb_GetDescriptor, last error %d\n", GetLastError());
+            printf("Failed to invoke WinUsb_GetDescriptor, last error %lu\n", GetLastError());
             CloseHandle(deviceFile);
             return false;
         }
@@ -145,7 +145,7 @@ bool getWinUSBLinks(JLinkDevVec& vec, const GUID* guid)
         WINUSB_SETUP_PACKET setup = {0x41, 0x01, 0x0040, 0x0000, 0x0000};
         ULONG transfered = 0;
         if (!WinUsb_ControlTransfer(winusbHandle, setup, NULL, 0, &transfered, NULL)) {
-            printf("Fail to invoke WinUsb_ControlTransfer, last error %d\n", GetLastError());
+            printf("Fail to invoke WinUsb_ControlTransfer, last error %lu\n", GetLastError());
         }
         DWORD timeout = 1000;
         WinUsb_SetPipePolicy(winusbHandle, outep, PIPE_TRANSFER_TIMEOUT, sizeof(timeout), &timeout);
@@ -175,7 +175,7 @@ bool getWinUSBLinks(JLinkDevVec& vec, const GUID* guid)
 
 bool getSeggerJlinks(JLinkDevVec& vec)
 {
-    GUID classGuid = {0x54654E76, 0xdcf7, 0x4a7f, 0x87, 0x8A, 0x4E, 0x8F, 0xCA, 0x0A, 0xCC, 0x9A};
+    GUID classGuid = { 0x54654E76, 0xdcf7, 0x4a7f, {0x87, 0x8A, 0x4E, 0x8F, 0xCA, 0x0A, 0xCC, 0x9A} };
     HDEVINFO devInfoSet = SetupDiGetClassDevsW(&classGuid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
     SP_DEVICE_INTERFACE_DATA interfaceData = {0};
     interfaceData.cbSize = sizeof(interfaceData);
@@ -239,9 +239,9 @@ bool getSeggerJlinks(JLinkDevVec& vec)
 
 bool getJLinks(JLinkDevVec& vec)
 {
-    GUID classGuid1 = {0xC78607E8, 0xDE76, 0x458B, 0xB7, 0xC1, 0x5C, 0x14, 0xA6, 0xF3, 0xA1, 0xD2};
+    GUID classGuid1 = { 0xC78607E8, 0xDE76, 0x458B, {0xB7, 0xC1, 0x5C, 0x14, 0xA6, 0xF3, 0xA1, 0xD2} };
     getSeggerJlinks(vec);
-    size_t oldcnt = vec.size();
+    //size_t oldcnt = vec.size();
     getWinUSBLinks(vec, &classGuid1);
     //if (vec.size() == oldcnt) {
     //    GUID classGuid2 = {0xA5DCBF10, 0x6530, 0x11D2, 0x90, 0x1F, 0x00, 0xC0, 0x4F, 0xB9, 0x51, 0xED};
@@ -264,6 +264,7 @@ void freeJLinks(JLinkDevVec& vec)
         CloseHandle(it->deviceFile);
     }
     g_recvpos = 0;
+    vec.clear();
 }
 
 unsigned char g_recvbuf[0x1000];

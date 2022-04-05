@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.28307.779
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EDUReViver_vc14", "EDUReViver\EDUReViver_vc14.vcxproj", "{F9C11080-C18C-4D6D-AC7F-5A5A53FDF613}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x86 = Debug|x86
+		Release|x86 = Release|x86
+		ReleaseCURL|x86 = ReleaseCURL|x86
+		ReleaseXP|x86 = ReleaseXP|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F9C11080-C18C-4D6D-AC7F-5A5A53FDF613}.Debug|x86.ActiveCfg = Debug|Win32
+		{F9C11080-C18C-4D6D-AC7F-5A5A53FDF613}.Debug|x86.Build.0 = Debug|Win32
+		{F9C11080-C18C-4D6D-AC7F-5A5A53FDF613}.Release|x86.ActiveCfg = Release|Win32
+		{F9C11080-C18C-4D6D-AC7F-5A5A53FDF613}.Release|x86.Build.0 = Release|Win32
+		{F9C11080-C18C-4D6D-AC7F-5A5A53FDF613}.ReleaseCURL|x86.ActiveCfg = ReleaseCURL|Win32
+		{F9C11080-C18C-4D6D-AC7F-5A5A53FDF613}.ReleaseCURL|x86.Build.0 = ReleaseCURL|Win32
+		{F9C11080-C18C-4D6D-AC7F-5A5A53FDF613}.ReleaseXP|x86.ActiveCfg = ReleaseXP|Win32
+		{F9C11080-C18C-4D6D-AC7F-5A5A53FDF613}.ReleaseXP|x86.Build.0 = ReleaseXP|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C68D3E17-E159-4883-94E7-69A6E376A7B8}
+	EndGlobalSection
+EndGlobal

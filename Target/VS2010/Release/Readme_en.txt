@@ -1,5 +1,5 @@
-This utility support all version of JLinkV10/V11. support genius brick which added bad features.
-don't support illegal clones. some check applied on my utility to prevent running on clones.
+This utility support all version of JLinkV10/V11. support genuine jlink brick by bad features.
+doesn't support illegal clones. some check applied on my utility to prevent running on clones.
 turn off winusb mode in JlinkConfig if you meet usb communicate problems.
 
 Usage:
@@ -25,4 +25,4 @@ EDUReViver -run to10
 this payload turns your V11 to V10. unplug and replug usb cable, then flash new firmware in jlink commander.
 
 
-You can only use my utility for research propose, or repair your genius jlink.
+You can only use my utility for research propose, or repair your genuine jlink.

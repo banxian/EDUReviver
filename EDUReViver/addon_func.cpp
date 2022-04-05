@@ -131,7 +131,7 @@ int readallcontent(const wchar_t* path, void** outptr)
     if (_wstat64(path, &st) == -1 || st.st_size == 0) {
         return -1;
     }
-    int fd = _wopen(path, O_RDONLY | O_BINARY); // O_BINARY not available in OSX
+    int fd = _wopen(path, O_RDONLY | O_BINARY, 0); // O_BINARY not available in OSX
     if (fd == -1) {
         return -1;
     }
@@ -148,7 +148,7 @@ int readpartcontent(const wchar_t* path, void** outptr, unsigned long long offse
     if (_wstat64(path, &st) == -1 || st.st_size == 0) {
         return -1;
     }
-    int fd = _wopen(path, O_RDONLY | O_BINARY); // O_BINARY not available in OSX
+    int fd = _wopen(path, O_RDONLY | O_BINARY, 0); // O_BINARY not available in OSX
     if (fd == -1) {
         return -1;
     }
@@ -164,7 +164,7 @@ int readpartcontent(const wchar_t* path, void** outptr, unsigned long long offse
 
 int savetofile(const wchar_t* path, void* data, size_t len)
 {
-    int fd = _wopen(path, O_CREAT | O_RDWR | O_BINARY,  S_IREAD | S_IWRITE );
+    int fd = _wopen(path, O_CREAT | O_RDWR | O_BINARY,  S_IREAD | S_IWRITE);
     if (fd == -1) {
         printf("errno: %d, msg: %s\n", errno, strerror(errno));
         return -1;
@@ -213,29 +213,40 @@ void trimstr(char* str)
     }
 }
 
-bool setwin32filetime(const wchar_t* path, unsigned long long filetime)
+bool setwin32filetime(const char* path, unsigned long long filetime)
 {
 #ifdef _WIN32
-    HANDLE hFile = CreateFileW(path, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE hFile = CreateFileA(path, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
         return false;
     }
-    BOOL ok = SetFileTime(hFile, NULL, NULL, (FILETIME*)&filetime);
+    bool ok = SetFileTime(hFile, NULL, NULL, (FILETIME*)&filetime);
     CloseHandle(hFile);
     return ok;
 #endif
 }
 
-int errprintf(_In_z_ _Printf_format_string_ const char * _Format, ...) {
+int errprintf(__in_z __format_string const char * _Format, ...) {
     HANDLE hCon = GetStdHandle(STD_OUTPUT_HANDLE);
     CONSOLE_SCREEN_BUFFER_INFO info;
     GetConsoleScreenBufferInfo(hCon, &info);
     SetConsoleTextAttribute(hCon, FOREGROUND_RED);
     va_list va;
     va_start(va, _Format);
-    int len = vprintf(_Format, va);
+    int len = vfprintf(stderr, _Format, va);
     va_end(va);
     SetConsoleTextAttribute(hCon, info.wAttributes);
 
     return len;
+}
+
+bool fileexists(const char* path)
+{
+    WIN32_FIND_DATAA ffd;
+    HANDLE find = FindFirstFileA(path, &ffd);
+    if (find != INVALID_HANDLE_VALUE) {
+        CloseHandle(find);
+        return (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    }
+    return false;
 }

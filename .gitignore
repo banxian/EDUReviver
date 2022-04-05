@@ -8,6 +8,8 @@ __MACOSX/
 ipch/
 objfre_wxp_x86/
 Target/
+.vs/
+packages/
 .DS_Store
 thumb.db
 BuildLog.htm

@@ -88,7 +88,7 @@ bool loadFirmwareConfigs(const wchar_t* cfgpath)
                 char truefalse[0x71];
                 patcher_config item = {0,};
                 //"J-Link V10 compiled Feb  2 2018 18:12:40", 0x100840A0, 0x1A010718, 0x1A010EDA, false
-                int cnt = sscanf(line, "\"%[^\"]\", 0x%X, 0x%X, 0x%X, %[^,], %d, 0x%X, 0x%X, 0x%X", version, &item.sp, &item.lr, &item.usbrx, truefalse, &item.cmdReg, &item.R4, &item.R5, &item.R6);
+                int cnt = sscanf(line, "\"%[^\"]\", 0x%X, 0x%X, 0x%X, %[^,], %hhd, 0x%X, 0x%X, 0x%X", version, &item.sp, &item.lr, &item.usbrx, truefalse, &item.cmdReg, &item.R4, &item.R5, &item.R6);
                 if (cnt >= 5) {
                     truefalse[0x70] = 0;
                     version[0x70] = 0;
@@ -389,7 +389,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         calc_stack(insn, count, spdvec);
         uint32_t cmdtable = 0;
         int cmdcnt = 0;
-        int r4val = -1, r5val = -1, r6val = -1;
+        uint32_t r4val = -1, r5val = -1, r6val = -1;
         int spd1, spd2;
         uint32_t dispatchlr;
         uint32_t usbrxbuf = 0;
@@ -576,7 +576,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         if (rawCmdRegIdx == 5) r5val = cmdcnt + 0xE0;
         if (rawCmdRegIdx == 6) r6val = cmdcnt + 0xE0;
         //printf("\"%s\", 0x%08X, 0x%08X, 0x%08X, true, %d, 0x%X, 0x%X, 0x%X\n", reader.get_banner(), currstack, dispatchlr, usbrxbuf, rawCmdRegIdx, r4val, r5val, r6val);
-        patcher_config item = {currstack, dispatchlr, usbrxbuf, true, rawCmdRegIdx, r4val, r5val, r6val};
+        patcher_config item = {currstack, dispatchlr, usbrxbuf, true, (char)rawCmdRegIdx, r4val, r5val, r6val};
         add_user_config(reader.get_banner(), &item);
     }
     // IAR固件?
@@ -617,7 +617,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         count = cs_disasm(handle, reader.buf_at_addr(mainaddr & ~1), 0x70, (mainaddr & ~1), 0, &insn);
         IntVec spdvec;
         calc_stack(insn, count, spdvec);
-        size_t seekend = 0;
+        //size_t seekend = 0;
         uint32_t maintaskaddr = -1, taskstackinit = -1;
         int step = 0;
         for (size_t j = 0; j < count; j++) {
@@ -684,7 +684,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         count = cs_disasm(handle, reader.buf_at_addr(maintaskaddr & ~1), 0x120, (maintaskaddr & ~1), 0, &insn);
         calc_stack(insn, count, spdvec);
         step = 0;
-        uint32_t target;
+        uint32_t target = -1;
         int spd1, spd2, spd3;
         for (size_t j = 0; j < count; j++) {
             //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
@@ -693,7 +693,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
             if (step == 0 && insn[j].id == ARM_INS_LDRB && 
                 arm->op_count == 2 && arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg == ARM_REG_R0 &&
                 arm->operands[1].type == ARM_OP_MEM && arm->operands[1].mem.base == ARM_REG_SP) {
-                    seekend = j;
+                    //seekend = j;
                     step++;
             }
             if (step == 1 && insn[j].id == ARM_INS_BL) {
@@ -705,6 +705,10 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
             }
         }
         cs_free(insn, count);
+        if (target == -1) {
+            errprintf("Failed to find dispatchusbcmd!\n");
+            return NULL;
+        }
         // 寻找usbcmdtable
         count = cs_disasm(handle, reader.buf_at_addr(target & ~1), 0x120, (target & ~1), 0, &insn);
         calc_stack(insn, count, spdvec);
