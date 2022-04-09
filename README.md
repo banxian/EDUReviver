@@ -64,4 +64,4 @@ this payload turns your V11 to V10. unplug and replug usb cable, then flash new 
 
 Disclaimer
 ----------
-You can only use my utility for research propose, or repair your genius jlink.
+You can only use my utility for research propose, or repair your genuine jlink.

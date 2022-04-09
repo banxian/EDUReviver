@@ -165,15 +165,49 @@ int request_payload_online(int sn, const char* uid, const char* signature, const
 }
 #else
 
-bool winhttp_have_sni()
+bool os_is_reactos()
 {
+    bool found = false;
+    DWORD infosize = GetFileVersionInfoSizeA("schannel.dll", NULL);
+    void* info = malloc(infosize);
+    if (GetFileVersionInfoA("schannel.dll", 0, infosize, info)) {
+        struct LANGANDCODEPAGE {
+            WORD wLanguage;
+            WORD wCodePage;
+        } *lpTranslate;
+        UINT cbTranslate;
+        VerQueryValueA(info, "\\VarFileInfo\\Translation", (LPVOID*)&lpTranslate, &cbTranslate);
+        for( int i=0; i < (cbTranslate/sizeof(struct LANGANDCODEPAGE)); i++ ) {
+            char path[100];
+            sprintf_s(path, "\\StringFileInfo\\%04x%04x\\ProductName", lpTranslate[i].wLanguage, lpTranslate[i].wCodePage);
+            char* name;
+            UINT namelen;
+            if (VerQueryValueA(info, path, (LPVOID*)&name, &namelen)) {
+                //quickdump((size_t)name, (uint8_t*)name, namelen);
+                if (strncmp("ReactOS", name, strlen("ReactOS")) == 0) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+    }
+    free(info);
+    return found;
+}
+
+bool os_have_sni()
+{
+    if (os_is_reactos()) {
+        printf("Found ReactOS.\n");
+        return true;
+    }
     // TODO: check SChannel Version
-    OSVERSIONINFOEX osvi;
+    OSVERSIONINFOEXA osvi;
     osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
     osvi.dwMajorVersion = 6;
     DWORDLONG conditionmask = 0;
     VER_SET_CONDITION( conditionmask, VER_MAJORVERSION, VER_GREATER_EQUAL );
-    return VerifyVersionInfo(&osvi, VER_MAJORVERSION, conditionmask);
+    return VerifyVersionInfoA(&osvi, VER_MAJORVERSION, conditionmask);
 }
 
 int request_payload_online(int sn, const char* uid, const char* signature, const char* payloadname,  const char* payloadopt, char** reply, size_t* replylen)
@@ -181,7 +215,7 @@ int request_payload_online(int sn, const char* uid, const char* signature, const
     int retcode = 0;
     HINTERNET internet = InternetOpenA("EDUReViver/0.3.2", 0, 0, 0, 0);
     if (internet) {
-        bool havesni = winhttp_have_sni();
+        bool havesni = os_have_sni();
         if (HINTERNET connect = InternetConnectA(internet, apphost, havesni?INTERNET_DEFAULT_HTTPS_PORT:INTERNET_DEFAULT_HTTP_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0)) {
             DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_KEEP_CONNECTION;
             if (havesni) {
