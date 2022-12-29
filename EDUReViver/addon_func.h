@@ -7,8 +7,8 @@
 extern "C" {
 #endif
 
-unsigned char QuadBit2Hex(unsigned char num);
-unsigned char Hex2QuadBit(unsigned char chr);
+unsigned char Nibble2Hex(unsigned char num);
+unsigned char Hex2Nibble(unsigned char chr);
 
 void quickdump(unsigned int addr, const unsigned char *data, unsigned int amount);
 int readallcontent(const wchar_t* path, void** outptr);

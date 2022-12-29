@@ -18,10 +18,13 @@ EDUReViver -run swd off
 关闭SWD调试接口.  
 
 EDUReViver -run to11  
-转换V10到V11. 重新插拔后, 打开jlink commander会自动刷新固件.  
+转换V10/V12到V11. 重新插拔后, 打开jlink commander会自动刷新固件.  
 
 EDUReViver -run to10  
-转换V11到V10. 重新插拔后, 打开jlink commander会自动刷新固件.  
+转换V11/V12到V10. 重新插拔后, 打开jlink commander会自动刷新固件.  
+
+EDUReViver -run to12  
+转换V10/V11到V12. 重新插拔后, 打开jlink commander会自动刷新固件.  
 
 支持设备
 --------
@@ -57,10 +60,13 @@ EDUReViver -run swd off
 this payload locking SWD debug port on PCB again.  
 
 EDUReViver -run to11  
-this payload turns your V10 to V11. unplug and replug usb cable, then flash new firmware in jlink commander.  
+this payload turns your V10/V12 to V11. unplug and replug usb cable, then flash new firmware in jlink commander.  
 
 EDUReViver -run to10  
-this payload turns your V11 to V10. unplug and replug usb cable, then flash new firmware in jlink commander.  
+this payload turns your V11/V12 to V10. unplug and replug usb cable, then flash new firmware in jlink commander.  
+
+EDUReViver -run to10  
+this payload turns your V10/V11 to V12. unplug and replug usb cable, then flash new firmware in jlink commander.  
 
 Disclaimer
 ----------

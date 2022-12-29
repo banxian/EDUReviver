@@ -39,18 +39,24 @@ struct cmd_fine_write_read
     uint32_t readlen;       // sp+c max 0x10
     uint32_t somelen;       // sp+10
     uint8_t writebuf[0x10]; // sp+14
-    uint8_t remotebuf[0x18];// sp+24 (fill 4 byte)
+    uint8_t remotebuf[0x14];// sp+24 (0x14+4 extra byte)
 };
 struct cmd_fine_write_read_IAR : cmd_fine_write_read {
+    uint32_t pad;           // sp+38
     uint32_t regLR;         // sp+3C = LR
-    uint8_t overlay[1];     // sp+40
 };
 struct cmd_fine_write_read_SES : cmd_fine_write_read {
+    uint32_t readed;        // sp+34
     uint32_t R4;            // sp+38
     uint32_t R5;            // sp+3C
     uint32_t R6;            // sp+40
     uint32_t regLR;         // sp+44 = LR
-    uint8_t overlay[1];     // sp+48
+};
+struct cmd_fine_write_read_SES_new : cmd_fine_write_read {
+    uint32_t R4;            // sp+30
+    uint32_t R5;            // sp+34
+    uint32_t R6;            // sp+38
+    uint32_t regLR;         // sp+3C = LR
 };
 #pragma pack(pop)
 
@@ -58,7 +64,7 @@ cmd_fine_write_read* assembly_cmd_payload(int* cmdlen, const void* payload, size
 
 cmd_fine_write_read* assembly_cmd_payload(int* cmdlen, const void* payload, size_t payloadlen, const patcher_config* config, size_t readlen)
 {
-    size_t newlen = config->isSES?sizeof(cmd_fine_write_read_SES) - 1:sizeof(cmd_fine_write_read_IAR) - 1; // 38+1, 44+1
+    size_t newlen = config->isSES?(config->nopad?sizeof(cmd_fine_write_read_SES_new):sizeof(cmd_fine_write_read_SES)):sizeof(cmd_fine_write_read_IAR); // 38+1, 44+1
     size_t payloadoffset = (uint32_t)&((cmd_fine_write_read*)0)->somelen;
     if (payloadoffset + payloadlen > newlen) {
         newlen = payloadoffset + payloadlen; // overlay
@@ -68,18 +74,26 @@ cmd_fine_write_read* assembly_cmd_payload(int* cmdlen, const void* payload, size
     }
     cmd_fine_write_read* cmd = (cmd_fine_write_read*)malloc(newlen);
     cmd->cmd = 0xE0;
-    cmd->writelen = newlen - 1 - 0xC; // 2C/38
+    cmd->writelen = newlen - 1 - 0xC; // 2C/38/34
     cmd->readlen = readlen;
     memcpy((char*)cmd + payloadoffset, payload, payloadlen); // 发送后40B0处是我们代码
     if (config->isSES) {
-        cmd_fine_write_read_SES* ses = (cmd_fine_write_read_SES*)cmd;
-        ses->regLR = config->sp + 0xC | 1;
-        ses->R4 = config->R4;
-        ses->R5 = config->R5;
-        ses->R6 = config->R6;
+        if (config->nopad) {
+            cmd_fine_write_read_SES_new* ses = (cmd_fine_write_read_SES_new*)cmd;
+            ses->regLR = config->sp + 0x8 | 1; // BLX rxbuf时SP
+            ses->R4 = config->R4;
+            ses->R5 = config->R5;
+            ses->R6 = config->R6;
+        } else {
+            cmd_fine_write_read_SES* ses = (cmd_fine_write_read_SES*)cmd;
+            ses->regLR = config->sp + 0xC | 1;
+            ses->R4 = config->R4;
+            ses->R5 = config->R5;
+            ses->R6 = config->R6;
+        }
     } else {
         cmd_fine_write_read_IAR* iar = (cmd_fine_write_read_IAR*)cmd;
-        iar->regLR = config->sp + 0x10 | 1; // 指向嵌入开头
+        iar->regLR = config->sp + 0x10 | 1; // sp是BL rxbuf时候值. 指向payload入口(&somelen)
     }
     return cmd;
 }
@@ -146,7 +160,7 @@ int main(int argc, char * argv[])
     JLinkDevVec devvec;
     if (!getJLinks(devvec)) {
         errprintf("Failed to find device!\n");
-        return 0;
+        CLOSE_AND_EXIT(0);
     } else if (devvec.size() > 1) {
         errprintf("Only support one device, please unplug other probes!\n");
         CLOSE_AND_EXIT(0);
@@ -157,15 +171,15 @@ int main(int argc, char * argv[])
     jlinkLoopReadFirmwareVersion(&devvec[0], dataBuffer);
     dataBuffer[0x70] = 0;
     //isv9 = strstr((const char*)dataBuffer, "V9") != 0;
-    isv10 = (strstr((const char*)dataBuffer, "V10") != 0) || (strstr((const char*)dataBuffer, "V11") != 0);
+    isv10 = (strstr((const char*)dataBuffer, "V10") != 0) || (strstr((const char*)dataBuffer, "V11") != 0) || (strstr((const char*)dataBuffer, "V12") != 0);
     if (is_BTL_version((char*)dataBuffer)) {
-        errprintf("Please quit bootloader mode\n");
+        errprintf("Please quit Bootloader mode.\n");
         CLOSE_AND_EXIT(0);
     } else {
         printf("Firmware Version: %s\n", dataBuffer);
     }
     if (isv10 == false) {
-        errprintf("Only support v10,v11 devices.\n");
+        errprintf("Only support v10,v11,v12 devices.\n");
         CLOSE_AND_EXIT(0);
     }
     // check genius hardware
@@ -293,7 +307,7 @@ int main(int argc, char * argv[])
         // 单次溢出
         cmd_fine_write_read* m4rxcmd;
         if (config->isSES) {
-            // 需要额外的重定位
+            // SES版+2C是R4位置, SES新版+28就是R4位置, 此代码有效长度2C(28+4)
             unsigned char m4rxret[0x30] = {
                 0x8C, 0xB0, 0x0A, 0x48, 0x4F, 0xF4, 0x00, 0x61, 0x05, 0x4A, 0x90, 0x47, 0x07, 0x48, 0x01, 0x30,
                 0x80, 0x47, 0x01, 0xE0, 0xFF, 0xFF, 0xFF, 0xFF, 0x0C, 0xB0, 0xDF, 0xF8, 0x08, 0xF0, 0x00, 0x00,
@@ -301,10 +315,15 @@ int main(int argc, char * argv[])
             };
             *(uint32_t*)&m4rxret[0x20] = config->usbrx | 1;
             *(uint32_t*)&m4rxret[0x24] = config->lr | 1; // 要返回dispatchcmd
-            m4rxret[0x2] += config->cmdReg - 4;
-            m4rxret[0xC] += config->cmdReg - 4;
-            m4rxcmd = assembly_cmd_payload(&cmdlen, m4rxret, sizeof(m4rxret), config, 0);
-            *(&((cmd_fine_write_read_SES*)m4rxcmd)->R4 + config->cmdReg - 4) = *(uint32_t*)&m4rxret[0x2C]; // literal
+            // 孤单literal的重定位
+            m4rxret[0x2] += config->cmdReg - (config->nopad?5:4);
+            m4rxret[0xC] += config->cmdReg - (config->nopad?5:4);
+            m4rxcmd = assembly_cmd_payload(&cmdlen, m4rxret, sizeof(m4rxret)-8, config, 0);
+            if (config->nopad) {
+                *(&((cmd_fine_write_read_SES_new*)m4rxcmd)->R4 + config->cmdReg - 4) = *(uint32_t*)&m4rxret[0x2C]; // literal
+            } else {
+                *(&((cmd_fine_write_read_SES*)m4rxcmd)->R4 + config->cmdReg - 4) = *(uint32_t*)&m4rxret[0x2C]; // literal
+            }
         } else {
             unsigned char m4rxret[0x2C] = {
                 0x8C, 0xB0, 0x07, 0x48, 0x4F, 0xF4, 0x00, 0x61, 0x06, 0x4A, 0x90, 0x47, 0x04, 0x48, 0x01, 0x30,
@@ -360,7 +379,7 @@ int main(int argc, char * argv[])
             jlinkSendCommand(&devvec[0], ldrcmd, cmdlen, NULL, 0);
             free(ldrcmd);
         }
-        // SES固件 R4~R6无可用空间情况的第二次溢出, 为了兼容未来固件
+        // SES固件 R4~R6无可用空间情况的第二次溢出, 为了兼容未来固件(但不能不知R4~R6值)
         if (mode == pmM4Ret) {
             unsigned char m4rxret[0x24] = {
                 0x8C, 0xB0, 0x05, 0x48, 0x4F, 0xF4, 0x00, 0x61, 0x04, 0x4A, 0x90, 0x47, 0x02, 0x48, 0x01, 0x30,
@@ -636,8 +655,8 @@ void printdigest(const char* name, const uint8_t* digest, size_t len)
     char* line = (char*)_alloca(len * 3);
     for (size_t i = 0, pos = 0; i < len; i++) {
         uint8_t c = digest[i];
-        line[pos++] = QuadBit2Hex(c >> 4);
-        line[pos++] = QuadBit2Hex(c & 0xF);
+        line[pos++] = Nibble2Hex(c >> 4);
+        line[pos++] = Nibble2Hex(c & 0xF);
         line[pos++] = ' ';
     }
     fwrite(line, 1, len * 3 - 1, stdout);
@@ -648,8 +667,8 @@ char* dump2hex(const uint8_t* buf, size_t len, char* hex)
 {
     for (size_t i = 0, pos = 0; i < len; i++) {
         uint8_t c = buf[i];
-        hex[pos++] = QuadBit2Hex(c >> 4);
-        hex[pos++] = QuadBit2Hex(c & 0xF);
+        hex[pos++] = Nibble2Hex(c >> 4);
+        hex[pos++] = Nibble2Hex(c & 0xF);
     }
     hex[len*2] = 0;
     return hex;

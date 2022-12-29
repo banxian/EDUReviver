@@ -91,14 +91,16 @@ bool getWinUSBLinks(JLinkDevVec& vec, const GUID* guid)
 
         DWORD requiredSize = 0;
         SetupDiGetDeviceInterfaceDetailW(devInfoSet, &interfaceData, NULL, 0, &requiredSize, NULL);
-        void* tempBuffer = new uint8_t[requiredSize];
-        PSP_DEVICE_INTERFACE_DETAIL_DATA interfaceDetailData = static_cast<PSP_DEVICE_INTERFACE_DETAIL_DATA>(tempBuffer);
+        
+        PSP_DEVICE_INTERFACE_DETAIL_DATA interfaceDetailData = (PSP_DEVICE_INTERFACE_DETAIL_DATA)malloc(requiredSize);
         interfaceDetailData->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
         if (!SetupDiGetDeviceInterfaceDetailW(devInfoSet, &interfaceData, interfaceDetailData, requiredSize, &requiredSize, NULL)) {
+            free(interfaceDetailData);
             continue;
         }
         HANDLE deviceFile = CreateFileW(interfaceDetailData->DevicePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
         if (deviceFile == INVALID_HANDLE_VALUE) {
+            free(interfaceDetailData);
             continue;
         }
 
@@ -106,14 +108,16 @@ bool getWinUSBLinks(JLinkDevVec& vec, const GUID* guid)
         if (!WinUsb_Initialize(deviceFile, &winusbHandle)) {
             printf("Failed to invoke WinUsb_Initialize, last error %lu\n", GetLastError());
             CloseHandle(deviceFile);
-            continue;
-            //return false;
+            free(interfaceDetailData);
+            //continue;
+            return false;
         }
         uint8_t desc[0x200];
         ULONG desclen = 0x200;
         if (!WinUsb_GetDescriptor(winusbHandle, USB_CONFIGURATION_DESCRIPTOR_TYPE, 0, 0, desc, desclen, &desclen)) {
             printf("Failed to invoke WinUsb_GetDescriptor, last error %lu\n", GetLastError());
             CloseHandle(deviceFile);
+            free(interfaceDetailData);
             return false;
         }
         uint8_t inep = 0, outep = 0;
@@ -169,6 +173,7 @@ bool getWinUSBLinks(JLinkDevVec& vec, const GUID* guid)
             }
         }
         vec.push_back(dev);
+        free(interfaceDetailData);
     }
     return true;
 }
@@ -187,14 +192,15 @@ bool getSeggerJlinks(JLinkDevVec& vec)
 
         DWORD requiredSize = 0;
         SetupDiGetDeviceInterfaceDetailW(devInfoSet, &interfaceData, NULL, 0, &requiredSize, NULL);
-        void* tempBuffer = new uint8_t[requiredSize];
-        PSP_DEVICE_INTERFACE_DETAIL_DATA interfaceDetailData = static_cast<PSP_DEVICE_INTERFACE_DETAIL_DATA>(tempBuffer);
+        PSP_DEVICE_INTERFACE_DETAIL_DATA interfaceDetailData = (PSP_DEVICE_INTERFACE_DETAIL_DATA)malloc(requiredSize);
         interfaceDetailData->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
         if (!SetupDiGetDeviceInterfaceDetailW(devInfoSet, &interfaceData, interfaceDetailData, requiredSize, &requiredSize, NULL)) {
+            free(interfaceDetailData);
             continue;
         }
         HANDLE deviceFile = CreateFileW(interfaceDetailData->DevicePath, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (deviceFile == INVALID_HANDLE_VALUE) {
+            free(interfaceDetailData);
             continue;
         }
         wchar_t pipeFileName[1024] = {0};
@@ -203,6 +209,7 @@ bool getSeggerJlinks(JLinkDevVec& vec)
         HANDLE readPipeFile = CreateFileW(pipeFileName, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (readPipeFile == INVALID_HANDLE_VALUE) {
             CloseHandle(deviceFile);
+            free(interfaceDetailData);
             continue;
         }
 
@@ -212,6 +219,7 @@ bool getSeggerJlinks(JLinkDevVec& vec)
         if (writePipeFile == INVALID_HANDLE_VALUE) {
             CloseHandle(deviceFile);
             CloseHandle(readPipeFile);
+            free(interfaceDetailData);
             continue;
         }
 
@@ -233,6 +241,7 @@ bool getSeggerJlinks(JLinkDevVec& vec)
             }
         }
         vec.push_back(dev);
+        free(interfaceDetailData);
     }
     return true;
 }

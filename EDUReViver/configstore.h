@@ -6,12 +6,13 @@
 struct patcher_config
 {
     //const char* version;
-    uint32_t sp; // 定位代码运行和覆盖位置
-    uint32_t lr; // 返回dispatchcmd正常执行
+    uint32_t sp;    // 定位代码运行和覆盖位置
+    uint32_t lr;    // 返回dispatchcmd正常执行
     uint32_t usbrx;
-    bool isSES;  // SES需要使用R4-R6值
-    char cmdReg; // 能自由使用的寄存器
+    bool isSES;     // SES需要使用R4-R6值
+    char cmdReg;    // 能自由使用的寄存器
     uint32_t R4, R5, R6;
+    bool nopad;     // 栈末尾没有4字节空洞
 };
 
 tm get_build_date(const char* version);

@@ -42,7 +42,7 @@ void __main(void) __attribute__((used, section("RESET")));
 char writeflashpage(uint32_t destaddr, const void* src)
 {
     IAP iap_entry=(IAP)IAP_LOCATION;
-	char flashok = 0;
+    char flashok = 0;
     uint8_t sect = destaddr>=0x1A010000?(destaddr >> 16) + 7:(destaddr >> 13);
     uint32_t cmd[5];
     uint32_t* status = cmd;
@@ -96,11 +96,11 @@ char writeflashpage(uint32_t destaddr, const void* src)
 
 void __main(void)
 {
-	char pagecache[0x200]; // task stack
+    char pagecache[0x200]; // task stack
     
     __disable_irq();
     FeedWWDT();
-    if (*(uint8_t*)0x1A002F89 == '0' && *(uint32_t*)0x1A005E04 == 0x32051976) {
+    if ((*(uint8_t*)0x1A002F89 == '0' || *(uint8_t*)0x1A002F89 == '2') && *(uint32_t*)0x1A005E04 == 0x32051976) {
         wmemcpy((uint32_t*)pagecache, (void*)0x1A002E00, 0x200 / 4);
         pagecache[0x189] = '1'; // 1A002F89
         writeflashpage(0x1A002E00, pagecache);

@@ -100,13 +100,13 @@ void __main(void)
     
     __disable_irq();
     FeedWWDT();
-    if ((*(uint8_t*)0x1A002F89 == '1' || *(uint8_t*)0x1A002F89 == '2') && *(uint32_t*)0x1A005E04 == 0x32051976) {
+    if ((*(uint8_t*)0x1A002F89 == '0' || *(uint8_t*)0x1A002F89 == '1') && *(uint32_t*)0x1A005E04 == 0x32051976) {
         wmemcpy((uint32_t*)pagecache, (void*)0x1A002E00, 0x200 / 4);
-        pagecache[0x189] = '0'; // 1A002F89
+        pagecache[0x189] = '2'; // 1A002F89
         writeflashpage(0x1A002E00, pagecache);
         
         wmemcpy((uint32_t*)pagecache, (void*)0x1A000000, 0x200 / 4);
-        pagecache[0x139] = '0'; // 1A000139
+        pagecache[0x139] = '2'; // 1A000139
         writeflashpage(0x1A000000, pagecache);
     }
     __enable_irq();
