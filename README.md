@@ -65,7 +65,7 @@ this payload turns your V10/V12 to V11. unplug and replug usb cable, then flash 
 EDUReViver -run to10  
 this payload turns your V11/V12 to V10. unplug and replug usb cable, then flash new firmware in jlink commander.  
 
-EDUReViver -run to10  
+EDUReViver -run to12  
 this payload turns your V10/V11 to V12. unplug and replug usb cable, then flash new firmware in jlink commander.  
 
 Disclaimer
