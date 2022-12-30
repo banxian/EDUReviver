@@ -93,7 +93,7 @@ cmd_fine_write_read* assembly_cmd_payload(int* cmdlen, const void* payload, size
         }
     } else {
         cmd_fine_write_read_IAR* iar = (cmd_fine_write_read_IAR*)cmd;
-        iar->regLR = config->sp + 0x10 | 1; // sp是BL rxbuf时候值. 指向payload入口(&somelen)
+        iar->regLR = config->sp + 0x10 | 1; // sp是BL rxbuf时候值. +4&readed,+8&arg,+10指向&somelen(payload入口点)
     }
     return cmd;
 }

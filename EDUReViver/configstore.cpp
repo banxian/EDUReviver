@@ -609,7 +609,9 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
                 size_t cnt2 = cs_disasm(handle, reader.buf_at_addr(rxbeginaddr & ~1), 0x100, (rxbeginaddr & ~1), 0, &ins2);
                 bool hitted = false;
                 for (size_t j = 0; j < cnt2 - 1; j++) {
+#ifdef _DEBUG
                     printf("%"PRIx64"\t%s\t\t%s\n", ins2[j].address, ins2[j].mnemonic, ins2[j].op_str);
+#endif
                     cs_arm* arm = &ins2[j].detail->arm;
                     //ROM:1A0458B0  MOVW    R3, #3000
                     //ROM:1A0458B4  BL      sub_1A0410A0
