@@ -3,7 +3,8 @@ J-Link EDU Reviver
 
 使用方法
 --------
-解压所有文件到同一目录中, 在命令行下执行
+从右侧https://github.com/banxian/EDUReviver/releases页面下载可执行文件包.
+解压所有文件到目录中, 进入目录在命令行下执行想要的命令
 
 EDUReViver -run blinky  
 闪灯测试, 如果红灯闪烁12次, 说明设备能通过校验且网络通讯正常.  
@@ -12,10 +13,10 @@ EDUReViver -run revive
 去除多余的FlashDL之类的Features.  
 
 EDUReViver -run swd  
-打开SWD调试接口.  
+打开电路板SWD调试接口.  
 
 EDUReViver -run swd off  
-关闭SWD调试接口.  
+关闭电路板SWD调试接口.  
 
 EDUReViver -run to11  
 转换V10/V12到V11. 重新插拔后, 打开jlink commander会自动刷新固件.  
@@ -44,8 +45,8 @@ turn off winusb mode in JlinkConfig if you meet usb communicate problems.
 
 Usage
 --------
-extract all files to same folder.
-execute these commands in command prompt.
+download binary archive from release page. extract all files to same folder.
+cd to folder then execute these commands in command prompt.
 
 EDUReViver -run blinky  
 this payload blinks red LED 12 times. this should used to test your usb and network connection is fine.  
