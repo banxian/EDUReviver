@@ -3,7 +3,7 @@ J-Link EDU Reviver
 
 使用方法
 --------
-从右侧[releases](releases)页面下载最新[可执行文件包](https://github.com/banxian/EDUReviver/releases/download/v0.3.3-beta2/EDUReviver_b033_wdk.zip).
+从右侧[releases](https://github.com/banxian/EDUReviver/releases)页面下载最新[可执行文件包](https://github.com/banxian/EDUReviver/releases/download/v0.3.3-beta2/EDUReviver_b033_wdk.zip).
 解压所有文件到目录中, 进入目录在命令行下执行想要的命令
 
 EDUReViver -run blinky  
@@ -45,7 +45,7 @@ turn off winusb mode in JlinkConfig if you meet usb communicate problems.
 
 Usage
 --------
-download binary archive from [releases](releases) page. extract all files to same folder.
+download binary archive from [releases](https://github.com/banxian/EDUReviver/releases) page. extract all files to same folder.
 cd to folder then execute these commands in command prompt.
 
 EDUReViver -run blinky  
