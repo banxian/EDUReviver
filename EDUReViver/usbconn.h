@@ -71,6 +71,7 @@ struct JlinkDevice {
     };
     uint16_t pid;
     uint16_t vid;
+    uint32_t serial;
 };
 
 typedef std::vector<JlinkDevice> JLinkDevVec;

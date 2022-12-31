@@ -162,14 +162,18 @@ bool getWinUSBLinks(JLinkDevVec& vec, const GUID* guid)
         dev.readPipe = inep; // 0x81
         dev.writePipe = outep; // 0x01
         //"PCI\\VEN_%x&DEV_%x&SUBSYS_%x&REV_%x"
-        //0x00e5d95c "\\?\usb#vid_1366&pid_0101#000260113630#{54654e76-dcf7-4a7f-878a-4e8fca0acc9a}"
-        const wchar_t* vidstr = wcschr((const wchar_t*)interfaceDetailData->DevicePath, L'#');
-        if (vidstr) {
+        //"\\?\usb#vid_1366&pid_1020#000260113630#{c78607e8-de76-458b-b7c1-5c14a6f3a1d2}"
+        //"\\?\usb#vid_1366&pid_1024&mi_02#9&1a05735c&0&0002#{c78607e8-de76-458b-b7c1-5c14a6f3a1d2}"
+        if (const wchar_t* vidstr = wcschr((const wchar_t*)interfaceDetailData->DevicePath, L'#')) {
             vidstr++;
             uint32_t lvid, lpid;
             if (swscanf_s(vidstr, L"vid_%04x&pid_%04x", &lvid, &lpid) == 2) {
                 dev.pid = lpid;
                 dev.vid = lvid;
+            }
+            if (const wchar_t* snstr = wcschr(vidstr, L'#')) {
+                snstr++;
+                dev.serial = wcstoul(snstr, NULL, 0);
             }
         }
         vec.push_back(dev);
@@ -187,7 +191,11 @@ bool getSeggerJlinks(JLinkDevVec& vec)
 
     for (DWORD i = 0; ; i++) {
         if (!SetupDiEnumDeviceInterfaces(devInfoSet, NULL, &classGuid, i, &interfaceData)) {
-            return false;
+            if (GetLastError() == ERROR_NO_MORE_ITEMS) {
+                break;
+            } else {
+                continue;
+            }
         }
 
         DWORD requiredSize = 0;
@@ -203,6 +211,10 @@ bool getSeggerJlinks(JLinkDevVec& vec)
             free(interfaceDetailData);
             continue;
         }
+        //char InBuffer[64];
+        //DWORD BytesReturned = 0;
+        //DeviceIoControl(deviceFile, 0x220468u, InBuffer, 0x40u, InBuffer, 0x40u, &BytesReturned, 0);
+        //quickdump(0, (unsigned char*)InBuffer, sizeof(InBuffer));
         wchar_t pipeFileName[1024] = {0};
         wcscpy_s(pipeFileName, interfaceDetailData->DevicePath);
         wcscat_s(pipeFileName, L"\\pipe00");
@@ -231,13 +243,16 @@ bool getSeggerJlinks(JLinkDevVec& vec)
         // TODO: get usb port path
         //"PCI\\VEN_%x&DEV_%x&SUBSYS_%x&REV_%x"
         //0x00e5d95c "\\?\usb#vid_1366&pid_0101#000260113630#{54654e76-dcf7-4a7f-878a-4e8fca0acc9a}"
-        const wchar_t* vidstr = wcschr((const wchar_t*)interfaceDetailData->DevicePath, L'#');
-        if (vidstr) {
+        if (const wchar_t* vidstr = wcschr((const wchar_t*)interfaceDetailData->DevicePath, L'#')) {
             vidstr++;
             uint32_t lvid, lpid;
             if (swscanf_s(vidstr, L"vid_%04x&pid_%04x", &lvid, &lpid) == 2) {
                 dev.pid = lpid;
                 dev.vid = lvid;
+            }
+            if (const wchar_t* snstr = wcschr(vidstr, L'#')) {
+                snstr++;
+                dev.serial = wcstoul(snstr, NULL, 0);
             }
         }
         vec.push_back(dev);
