@@ -168,6 +168,7 @@
     <ClInclude Include="httpclient.h" />
     <ClInclude Include="targetver.h" />
     <ClInclude Include="usbconn.h" />
+    <ClInclude Include="usbtypes.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

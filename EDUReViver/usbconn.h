@@ -4,59 +4,45 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdint.h>
+#include <string>
+#include <map>
 #include <vector>
+#include "usbtypes.h"
 
 
-typedef PVOID WINUSB_INTERFACE_HANDLE, *PWINUSB_INTERFACE_HANDLE;
-#define USB_CONFIGURATION_DESCRIPTOR_TYPE 0x02
-#define RAW_IO 0x07
-#define PIPE_TRANSFER_TIMEOUT 0x03
-#define MAXIMUM_TRANSFER_SIZE 0x08
+struct hublocation {
+    std::string hubDevID;
+    std::string hubName;
+    int devPort;
+    bool operator==(const hublocation& rhs) const
+    {
+        return (hubDevID == rhs.hubDevID && devPort == rhs.devPort);
+    }
+    void clear();
+};
 
-#pragma pack(push, 1)
-typedef struct _USB_CONFIGURATION_DESCRIPTOR {
-    UCHAR  bLength;
-    UCHAR  bDescriptorType;
-    USHORT wTotalLength;
-    UCHAR  bNumInterfaces;
-    UCHAR  bConfigurationValue;
-    UCHAR  iConfiguration;
-    UCHAR  bmAttributes;
-    UCHAR  MaxPower;
-} USB_CONFIGURATION_DESCRIPTOR, *PUSB_CONFIGURATION_DESCRIPTOR;
+struct hublocless{
+    bool operator()(const hublocation& lhs, const hublocation& rhs) const {
+        int hubcomp = lhs.hubDevID.compare(rhs.hubDevID);
+        if (hubcomp == 0) {
+            return lhs.devPort < rhs.devPort;
+        } else {
+            return hubcomp < 0;
+        }
+    }
+};
 
-typedef struct _USB_INTERFACE_DESCRIPTOR {
-    UCHAR bLength;
-    UCHAR bDescriptorType;
-    UCHAR bInterfaceNumber;
-    UCHAR bAlternateSetting;
-    UCHAR bNumEndpoints;
-    UCHAR bInterfaceClass;
-    UCHAR bInterfaceSubClass;
-    UCHAR bInterfaceProtocol;
-    UCHAR iInterface;
-} USB_INTERFACE_DESCRIPTOR, *PUSB_INTERFACE_DESCRIPTOR;
-
-typedef struct _USB_ENDPOINT_DESCRIPTOR {
-    UCHAR  bLength;
-    UCHAR  bDescriptorType;
-    UCHAR  bEndpointAddress;
-    UCHAR  bmAttributes;
-    USHORT wMaxPacketSize;
-    UCHAR  bInterval;
-} USB_ENDPOINT_DESCRIPTOR, *PUSB_ENDPOINT_DESCRIPTOR;
-
-typedef struct _WINUSB_SETUP_PACKET {
-    UCHAR   RequestType;
-    UCHAR   Request;
-    USHORT  Value;
-    USHORT  Index;
-    USHORT  Length;
-} WINUSB_SETUP_PACKET, *PWINUSB_SETUP_PACKET;
-#pragma pack(pop)
-
-struct JlinkDevice {
+// DeviceManager/Registry
+struct JlinkDeviceInfo {
     bool isWinusb;
+    uint16_t pid;
+    uint16_t vid;
+    uint32_t winSerial;
+    std::string devicePath;
+    hublocation locationInfo;
+};
+
+struct JlinkDevice : JlinkDeviceInfo {
     HANDLE deviceFile;
     union {
         struct {
@@ -69,24 +55,65 @@ struct JlinkDevice {
             UCHAR writePipe; // 81
         };
     };
-    uint16_t pid;
-    uint16_t vid;
-    uint32_t serial;
+    void open();
+    void close();
 };
 
+typedef std::vector<JlinkDeviceInfo> JLinkInfoVec;
 typedef std::vector<JlinkDevice> JLinkDevVec;
+
+class LinkKeeper {
+private:
+    typedef std::map<hublocation, JlinkDevice, hublocless> JLinkDevMap; // location, device
+    JLinkDevMap fDevices;
+    hublocation fUsedDevice; // location
+    HANDLE fKeeperThread;
+    bool fKeeping;
+    bool fWaitReconnect;
+public:
+    LinkKeeper();
+    void createKeeperThread();
+    void closeKeeperThread();
+    int scanJLinks();
+    void freeJLinks();
+private:
+    bool enumerateDevices(const GUID* guid, bool isWinUSB);
+    JlinkDevice* getCurrDevice();
+private:
+    static DWORD WINAPI ListenerExecute(LPVOID arg);
+    static LRESULT CALLBACK ListernerWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+public:
+    static bool processDeviceNotification(const char* devpath, const GUID* guid, bool add);
+    static int getJLinksSnap(JLinkInfoVec& vec);
+    static bool selectDevice(const hublocation& location);
+    static void prepareReconnect();
+    static bool waitReconnect(uint32_t timeout, uint32_t step);
+    static bool sendCommand(void const* commandBuffer, uint32_t commandLength, void* resultBuffer, uint32_t resultHeaderLength);
+    static bool continueReadResult(void* resultBuffer, uint32_t resultLength);
+    static bool commandReadFirmwareVersion(void* dataBuffer);
+    static bool loopReadFirmwareVersion(void* dataBuffer);
+    static bool commandReadEmulatorMemory(uint32_t address, uint32_t length, void* dataBuffer);
+    static bool commandSetEmulateOption(uint32_t option, uint32_t val, uint32_t* status);
+    static bool commandSendUpdateFirmware(uint8_t* reply);
+    static bool commandSendSelectInterface(uint8_t newif, uint32_t* oldif);
+    static bool dumpFullFirmware(uint32_t addr, uint32_t size, void* buf);
+    static bool commandReadUID(uint32_t* size, void* dataBuffer);
+    static bool commandReadOTS(void* dataBuffer);
+};
+
+extern LinkKeeper* theKeeper;
+extern GUID winusbguid2;
+extern GUID seggerguid2;
+
+
+void startupKeeper();
+void shutdownKeeper();
 
 int LoadWinusb();
 int UnloadWinusb();
 
-bool hotlinkSendCommand(WINUSB_INTERFACE_HANDLE winusbHandle, void const* commandBuffer, uint32_t commandLength, void* resultBuffer, uint32_t resultHeaderLength);
-bool hotlinkContinueReadResult(WINUSB_INTERFACE_HANDLE winusbHandle, void* resultBuffer, uint32_t resultLength);
-bool hotlinkReadLenResult(WINUSB_INTERFACE_HANDLE winusbHandle, void* recbuf, size_t* reclen);
-bool hotlinkSendRec(WINUSB_INTERFACE_HANDLE winusbHandle, void const* recbuf, size_t reclen, int32_t* retcode);
-bool hotlinkRecvRecPasv(WINUSB_INTERFACE_HANDLE winusbHandle, int32_t* retcode, void* recbuf, size_t* reclen);
-
-bool getWinUSBLinks(JLinkDevVec& vec);
-bool getSeggerJlinks(JLinkDevVec& vec, GUID* guid);
+bool getWinUSBLinks(JLinkDevVec& vec, const GUID* guid);
+bool getSeggerJlinks(JLinkDevVec& vec, const GUID* guid);
 bool getJLinks(JLinkDevVec& vec);
 void freeJLinks(JLinkDevVec& vec);
 #ifdef WRITERTHREAD

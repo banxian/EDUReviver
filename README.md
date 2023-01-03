@@ -3,7 +3,7 @@ J-Link EDU Reviver
 
 使用方法
 --------
-从右侧[releases](https://github.com/banxian/EDUReviver/releases)页面下载最新[可执行文件包](https://github.com/banxian/EDUReviver/releases/download/v0.3.3-beta2/EDUReviver_b033_wdk.zip).
+从右侧[releases](https://github.com/banxian/EDUReviver/releases)页面下载最新[可执行文件包](https://github.com/banxian/EDUReviver/releases/download/v0.3.5-beta/EDUReviver_bin_b035.zip).
 解压所有文件到目录中, 进入目录在命令行下执行想要的命令
 
 EDUReViver -run blinky  

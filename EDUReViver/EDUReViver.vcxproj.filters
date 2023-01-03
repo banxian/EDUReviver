@@ -50,5 +50,8 @@
     <ClInclude Include="crypto.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="usbtypes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

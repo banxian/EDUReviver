@@ -106,8 +106,7 @@ enum payloadmode {
 };
 
 
-#define CLOSE_AND_EXIT(code) freeJLinks(devvec);\
-    UnloadWinusb();\
+#define CLOSE_AND_EXIT(code) UnloadWinusb();\
     return code;
 
 void printmismatch(const char* name, bool mismatch)
@@ -118,6 +117,8 @@ void printmismatch(const char* name, bool mismatch)
         printf("%s OK.\n", name);
     }
 }
+
+
 
 int main(int argc, char * argv[])
 {
@@ -150,25 +151,40 @@ int main(int argc, char * argv[])
         }
     }
     if (payloadname == 0) {
-        printf("V10ReViver -run <blinky|revive|swd|to11|to10> [options]\n");
+        printf("EDUReViver -run <blinky|revive|swd|to11|to10|to12> [options]\n");
         return -1;
     }
 
     if (LoadWinusb() != 0) {
         printf("No WinUSB support because WinUSB.dll is corrupt or missing.\n");;
     }
-    JLinkDevVec devvec;
-    if (!getJLinks(devvec)) {
+    startupKeeper();
+    atexit(shutdownKeeper);
+    JLinkInfoVec infovec;
+    if (!LinkKeeper::getJLinksSnap(infovec)) {
         errprintf("Failed to find device!\n");
         CLOSE_AND_EXIT(0);
-    } else if (devvec.size() > 1) {
-        errprintf("Only support one device, please unplug other probes!\n");
-        CLOSE_AND_EXIT(0);
+    } else if (infovec.size() > 1) {
+        int i = 1;
+        for (JLinkInfoVec::const_iterator it = infovec.begin(); it != infovec.end(); it++, i++) {
+            printf("%d: %s [%d] sn %d%s\n", i, it->locationInfo.hubName.c_str(), it->locationInfo.devPort, it->winSerial, it->isWinusb?" WinUSB":"");
+        }
+        printf("Input device index: ");
+        scanf_s("%d", &i);
+        getchar();
+        if (1 <= i && i <= infovec.size()) {
+            LinkKeeper::selectDevice(infovec.at(i - 1).locationInfo);
+        } else {
+            errprintf("Out of index!\n");
+            CLOSE_AND_EXIT(0);
+        }
+    } else {
+        LinkKeeper::selectDevice(infovec.at(0).locationInfo); // one device
     }
 
     uint8_t dataBuffer[512] = {0};
     bool isv10 = false;
-    jlinkLoopReadFirmwareVersion(&devvec[0], dataBuffer);
+    LinkKeeper::loopReadFirmwareVersion(dataBuffer);
     dataBuffer[0x70] = 0;
     //isv9 = strstr((const char*)dataBuffer, "V9") != 0;
     isv10 = (strstr((const char*)dataBuffer, "V10") != 0) || (strstr((const char*)dataBuffer, "V11") != 0) || (strstr((const char*)dataBuffer, "V12") != 0);
@@ -182,7 +198,7 @@ int main(int argc, char * argv[])
         errprintf("Only support v10,v11,v12 devices.\n");
         CLOSE_AND_EXIT(0);
     }
-    // check genius hardware
+    // check genuine hardware
     const patcher_config* config = find_patcher_config((char*)dataBuffer);
     uint32_t sn, snchecksum;
     uint8_t snuidbuf[36];
@@ -191,7 +207,7 @@ int main(int argc, char * argv[])
     bool touchfeatures = _stricmp(payloadname, "revive") == 0;
     bool touchsn = _stricmp(payloadname, "setsn") == 0;
     bool touchcrp = _stricmp(payloadname, "swd") == 0;
-    if (jlinkCommandReadOTS(&devvec[0], dataBuffer)) {
+    if (LinkKeeper::commandReadOTS(dataBuffer)) {
         sn = *(uint32_t*)dataBuffer;
         snchecksum = *(uint32_t*)(dataBuffer + 4);
         otssign = dataBuffer + 0x100;
@@ -207,7 +223,7 @@ int main(int argc, char * argv[])
     bool otssignok = false;
     void* myapp = 0;
     int applen = 0;
-    if (jlinkCommandReadUID(&devvec[0], &uidlen, &snuidbuf[4])) {
+    if (LinkKeeper::commandReadUID(&uidlen, &snuidbuf[4])) {
         char* uidstr = base64_encode(&snuidbuf[4], uidlen);
         char* signstr = base64_encode((uint8_t*)otssign, 0x100);
         char* reply = 0;
@@ -249,7 +265,7 @@ int main(int argc, char * argv[])
     uint32_t dumpsize = config?0x8000:0x80000;
     // dump bootloader/firmware and parse
     char* fwdump = (char*)malloc(dumpsize);
-    if (jlinkDumpFullFirmware(&devvec[0], 0x1A000000, dumpsize, fwdump)) {
+    if (LinkKeeper::dumpFullFirmware(0x1A000000, dumpsize, fwdump)) {
         bool bootloaderok = is_offical_bootloader(fwdump);
         if (touchcrp) {
             printCRPlevel(*(uint32_t*)&fwdump[0x2FC]);
@@ -289,7 +305,7 @@ int main(int argc, char * argv[])
     }
 
     uint32_t oldif;
-    if (jlinkCommandSendSelectInterface(&devvec[0], 3, &oldif)) {
+    if (LinkKeeper::commandSendSelectInterface(3, &oldif)) {
         printf("Change interface: %d -> 3\n", oldif);
     } else {
         errprintf("Select interface failed!\n");
@@ -334,7 +350,7 @@ int main(int argc, char * argv[])
             *(uint32_t*)&m4rxret[0x28] = config->lr | 1; // 要返回dispatchcmd
             m4rxcmd = assembly_cmd_payload(&cmdlen, m4rxret, sizeof(m4rxret), config, 0);
         }
-        jlinkSendCommand(&devvec[0], m4rxcmd, cmdlen, &readed, sizeof(readed));
+        LinkKeeper::sendCommand(m4rxcmd, cmdlen, &readed, sizeof(readed));
         free(m4rxcmd);
     } else {
         // 双次溢出
@@ -347,7 +363,7 @@ int main(int argc, char * argv[])
         };
         *(uint32_t*)&patcher[0x20] = config->lr + 1; // 第一次要返回dispatchcmd
         cmd_fine_write_read* patchercmd = assembly_cmd_payload(&cmdlen, patcher, sizeof(patcher), config, 0);
-        jlinkSendCommand(&devvec[0], patchercmd, cmdlen, &readed, sizeof(readed));
+        LinkKeeper::sendCommand(patchercmd, cmdlen, &readed, sizeof(readed));
         free(patchercmd);
         M0patched = true;
         // 此时代码可以使用连续的0x2C/0x28内容, 其他注意事项同上
@@ -376,7 +392,7 @@ int main(int argc, char * argv[])
                 *(uint32_t*)&m0ldr[0x28] = config->lr | 1;
                 ldrcmd = assembly_cmd_payload(&cmdlen, m0ldr, sizeof(m0ldr), config, -0x18);
             }
-            jlinkSendCommand(&devvec[0], ldrcmd, cmdlen, NULL, 0);
+            LinkKeeper::sendCommand(ldrcmd, cmdlen, NULL, 0);
             free(ldrcmd);
         }
         // SES固件 R4~R6无可用空间情况的第二次溢出, 为了兼容未来固件(但不能不知R4~R6值)
@@ -389,7 +405,7 @@ int main(int argc, char * argv[])
             *(uint32_t*)&m4rxret[0x1C] = config->usbrx | 1;
             *(uint32_t*)&m4rxret[0x20] = config->lr | 1; // 要返回dispatchcmd
             cmd_fine_write_read* m4rxcmd = assembly_cmd_payload(&cmdlen, m4rxret, sizeof(m4rxret), config, 0);
-            jlinkSendCommand(&devvec[0], m4rxcmd, cmdlen, &readed, sizeof(readed));
+            LinkKeeper::sendCommand(m4rxcmd, cmdlen, &readed, sizeof(readed));
             free(m4rxcmd);
         }
     }
@@ -400,20 +416,21 @@ int main(int argc, char * argv[])
         // 超写模式, 不需接收器部分, 最后需重启
         // 特殊payload: 不带返回指针, 单2C/28 gap
         cmd_fine_write_read* m4loopcmd = assembly_cmd_payload(&cmdlen, myapp, applen, config, -0x18);
-        jlinkSendCommand(&devvec[0], m4loopcmd, cmdlen, NULL, 0);
+        LinkKeeper::prepareReconnect();
+        LinkKeeper::sendCommand(m4loopcmd, cmdlen, NULL, 0);
         free(m4loopcmd);
     } else {
         // 填充到800发出(因为接收器要接满800,可以改loader变为400/200)
         int applenfull = 0x800;
         myapp = realloc(myapp, 0x800);
         memset((char*)myapp + applen, 0, applenfull - applen);
-        jlinkSendCommand(&devvec[0], myapp, applenfull, NULL, 0);
+        LinkKeeper::sendCommand(myapp, applenfull, NULL, 0);
     }
     free(myapp);
     // 清理步骤, 如果打过M0补丁, 则恢复补丁, 重启版除外, 等他重启
     if (M0patched && mode != pmM4Reset) {
         uint32_t oldif2;
-        if (jlinkCommandSendSelectInterface(&devvec[0], oldif, &oldif2)) {
+        if (LinkKeeper::commandSendSelectInterface(oldif, &oldif2)) {
             printf("Change interface: %d -> %d\n", oldif2, oldif);
         } else {
             errprintf("Select interface failed!\n");
@@ -421,19 +438,13 @@ int main(int argc, char * argv[])
         }
     }
     if (mode == pmM4Reset) {
-        freeJLinks(devvec);
-
         printf("Waiting device re-connect...\n");
 
-        SleepEx(5000, TRUE);
-        if (!getJLinks(devvec)) {
-            errprintf("Failed to find device!\n");
-            return 0;
-        } else if (devvec.size() > 1) {
-            errprintf("Only support single device, please unplug other probes!\n");
+        if (!LinkKeeper::waitReconnect(5000, 100)) {
+            errprintf("Failed to reconnect in 5 sec!\n");
             CLOSE_AND_EXIT(0);
         }
-        jlinkLoopReadFirmwareVersion(&devvec[0], dataBuffer);
+        LinkKeeper::loopReadFirmwareVersion(dataBuffer);
         if (is_BTL_version((char*)dataBuffer)) {
             printf("Found BTL Mode.\n");
         } else {
@@ -441,7 +452,7 @@ int main(int argc, char * argv[])
         }
         quickdump(0, dataBuffer, 0x70);
     }
-    if ((touchfeatures || touchsn) && jlinkCommandReadOTS(&devvec[0], dataBuffer)) {
+    if ((touchfeatures || touchsn) && LinkKeeper::commandReadOTS(dataBuffer)) {
         if (touchsn) {
             sn = *(uint32_t*)dataBuffer;
             snchecksum = *(uint32_t*)(dataBuffer + 4);
@@ -455,12 +466,12 @@ int main(int argc, char * argv[])
     }
     if (touchcrp) {
         uint32_t crp;
-        if (jlinkDumpFullFirmware(&devvec[0], 0x1A0002FC, 4, &crp)) {
+        if (LinkKeeper::dumpFullFirmware(0x1A0002FC, 4, &crp)) {
             printCRPlevel(crp);
         }
     }
 
-    freeJLinks(devvec);
+    shutdownKeeper();
     UnloadWinusb();
 #ifdef _DEBUG
     _getch();
