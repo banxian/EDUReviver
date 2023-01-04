@@ -802,7 +802,7 @@ bool lookupTopSeggerDevID(DEVINST* devinst, uint16_t vid, char* devid, char* hub
             }
             // tricky WinXP support (from USBView)
             // devid to devpath
-            if (CM_Get_Device_Interface_ListA((LPGUID)&GUID_DEVINTERFACE_USB_HUB, parentid, buf, 512, 0) == CR_SUCCESS) {
+            if (CM_Get_Device_Interface_ListA((LPGUID)&GUID_DEVINTERFACE_USB_HUB, parentid, buf, sizeof(buf), 0) == CR_SUCCESS) {
                 // TODO: cache lookup table
                 HANDLE hubhandle = CreateFileA(buf, GENERIC_WRITE, FILE_SHARE_WRITE, 0, OPEN_EXISTING, 0, 0);
                 USB_NODE_INFORMATION hubinfo;

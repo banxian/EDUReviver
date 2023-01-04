@@ -213,7 +213,7 @@ bool os_have_sni()
 int request_payload_online(int sn, const char* uid, const char* signature, const char* payloadname,  const char* payloadopt, char** reply, size_t* replylen)
 {
     int retcode = 0;
-    HINTERNET internet = InternetOpenA("EDUReViver/0.3.3", 0, 0, 0, 0);
+    HINTERNET internet = InternetOpenA("EDUReViver/0.3.5", 0, 0, 0, 0);
     if (internet) {
         bool havesni = os_have_sni();
         if (HINTERNET connect = InternetConnectA(internet, apphost, havesni?INTERNET_DEFAULT_HTTPS_PORT:INTERNET_DEFAULT_HTTP_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0)) {

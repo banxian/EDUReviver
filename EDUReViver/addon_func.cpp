@@ -125,7 +125,7 @@ int readpartcontent(const wchar_t* path, void** outptr, unsigned long long offse
 
 int savetofile(const wchar_t* path, void* data, size_t len)
 {
-    int fd = _wopen(path, O_CREAT | O_RDWR | O_BINARY,  S_IREAD | S_IWRITE);
+    int fd = _wopen(path, O_CREAT | O_RDWR | O_BINARY, S_IREAD | S_IWRITE);
     if (fd == -1) {
         printf("errno: %d, msg: %s\n", errno, strerror(errno));
         return -1;
