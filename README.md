@@ -3,7 +3,7 @@ J-Link EDU Reviver
 
 使用方法
 --------
-从右侧[releases](https://github.com/banxian/EDUReviver/releases)页面下载最新[可执行文件包](https://github.com/banxian/EDUReviver/releases/download/v0.3.5-beta/EDUReviver_bin_b035.zip).
+从右侧[releases](https://github.com/banxian/EDUReviver/releases)页面下载最新[可执行文件包](https://github.com/banxian/EDUReviver/releases/download/v0.3.6-beta/EDUReviver_bin_b036.zip).
 解压所有文件到目录中, 进入目录在命令行下执行想要的命令
 
 EDUReViver -run blinky  
@@ -22,10 +22,10 @@ EDUReViver -run to11
 转换V10/V12到V11. 重新插拔后, 打开jlink commander会自动刷新固件.  
 
 EDUReViver -run to10  
-转换V11/V12到V10. 重新插拔后, 打开jlink commander会自动刷新固件.  
+转换V11/V12到V10. 重新插拔后, 打开jlink commander会自动刷新固件. 原装V12无法降级.  
 
 EDUReViver -run to12  
-转换V10/V11到V12. 重新插拔后, 打开jlink commander会自动刷新固件.  
+转换V10/V11到V12. 重新插拔后, 打开jlink commander会自动刷新固件. 注意因为没有V12真机, 此工具转换的V12 Bootloader不原装.  
 
 支持设备
 --------
@@ -61,13 +61,13 @@ EDUReViver -run swd off
 this payload locking SWD debug port on PCB again.  
 
 EDUReViver -run to11  
-this payload turns your V10/V12 to V11. unplug and replug usb cable, then flash new firmware in jlink commander.  
+this payload turns your V10/fakeV12 to V11. unplug and replug usb cable, then flash new firmware in jlink commander.  
 
 EDUReViver -run to10  
-this payload turns your V11/V12 to V10. unplug and replug usb cable, then flash new firmware in jlink commander.  
+this payload turns your V11/fakeV12 to V10. unplug and replug usb cable, then flash new firmware in jlink commander.  
 
 EDUReViver -run to12  
-this payload turns your V10/V11 to V12. unplug and replug usb cable, then flash new firmware in jlink commander.  
+this payload turns your V10/V11 to fakeV12. unplug and replug usb cable, then flash new firmware in jlink commander.  
 
 Disclaimer
 ----------

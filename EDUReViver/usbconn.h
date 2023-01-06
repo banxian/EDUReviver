@@ -98,6 +98,7 @@ public:
     static bool commandSendSelectInterface(uint8_t newif, uint32_t* oldif);
     static bool dumpFullFirmware(uint32_t addr, uint32_t size, void* buf);
     static bool commandReadUID(uint32_t* size, void* dataBuffer);
+    static bool commandReadOTSX(void* dataBuffer);
     static bool commandReadOTS(void* dataBuffer);
 };
 
@@ -131,6 +132,7 @@ bool jlinkCommandSendUpdateFirmware(JlinkDevice* dev, uint8_t* reply);
 bool jlinkCommandSendSelectInterface(JlinkDevice* dev, uint8_t newif, uint32_t* oldif);
 bool jlinkDumpFullFirmware(JlinkDevice* dev, uint32_t addr, uint32_t size, void* buf);
 bool jlinkCommandReadUID(JlinkDevice* dev, uint32_t* size, void* dataBuffer);
-bool jlinkCommandReadOTS(JlinkDevice* dev, void* dataBuffer);
+bool jlinkCommandReadOTSX(JlinkDevice* dev, void* dataBuffer); // cmd16 otsx, size 0x200
+bool jlinkCommandReadOTS(JlinkDevice* dev, void* dataBuffer); // cmde6 size 0x100
 
 #endif

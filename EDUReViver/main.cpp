@@ -207,7 +207,7 @@ int main(int argc, char * argv[])
     bool touchfeatures = _stricmp(payloadname, "revive") == 0;
     bool touchsn = _stricmp(payloadname, "setsn") == 0;
     bool touchcrp = _stricmp(payloadname, "swd") == 0;
-    if (LinkKeeper::commandReadOTS(dataBuffer)) {
+    if (LinkKeeper::commandReadOTSX(dataBuffer)) {
         sn = *(uint32_t*)dataBuffer;
         snchecksum = *(uint32_t*)(dataBuffer + 4);
         otssign = dataBuffer + 0x100;
@@ -282,7 +282,7 @@ int main(int argc, char * argv[])
         }
     } else {
         free(fwdump);
-        errprintf("Dumping failed. Can't check device's genius.\n");
+        errprintf("Dumping failed. Can't check device's genuine.\n");
         if (myapp) {
             free(myapp);
         }
@@ -612,6 +612,7 @@ bool is_offical_bootloader(const void* btl)
     *(uint32_t*)&buff[0x2FC] = 0x12345678; // CRP1
     memset(&buff[0x130], 0xFF, 0x70); // Banner
     buff[0x2F89] = '0'; // V10/V11
+    *(uint16_t*)&buff[0x2EA0] = 0xB120; // V12 CBZ patch
     unsigned char digest[32];
     if (sha256(buff, 0x54F8, digest)) {
         unsigned char myhash[32] = {

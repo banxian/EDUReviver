@@ -94,6 +94,9 @@ void hublocation::clear()
 void JlinkDevice::open()
 {
     if (deviceFile == INVALID_HANDLE_VALUE) {
+        if (devicePath.empty()) {
+            return;
+        }
         if (isWinusb) {
             HANDLE deviceFile = CreateFileA(devicePath.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
             if (deviceFile == INVALID_HANDLE_VALUE) {
@@ -417,7 +420,7 @@ LRESULT CALLBACK LinkKeeper::ListernerWndProc(HWND hWnd, UINT message, WPARAM wP
             break;
         case DBT_DEVICEREMOVECOMPLETE:
             printf("%s removed\n", devif->dbcc_name);
-            LinkKeeper::processDeviceNotification(devif->dbcc_name, &devif->dbcc_classguid, true);
+            LinkKeeper::processDeviceNotification(devif->dbcc_name, &devif->dbcc_classguid, false);
             break;
         }
         break;
@@ -569,13 +572,16 @@ JlinkDevice* LinkKeeper::getCurrDevice()
 
 bool LinkKeeper::processDeviceNotification(const char* devpath, const GUID* guid, bool add)
 {
+    // 设备拔除时候, 已经无法正常解析ID等信息, 可适配的就是devpath
     bool issegger2 = memcmp(guid, &seggerguid2, sizeof(seggerguid2)) == 0;
     bool iswinusb2 = memcmp(guid, &winusbguid2, sizeof(winusbguid2)) == 0;
     if (issegger2 || iswinusb2) {
-        JlinkDevice dev;
-        extractDevProp(devpath, dev);
         if (add) {
+            JlinkDevice dev;
+            extractDevProp(devpath, dev);
             dev.isWinusb = iswinusb2;
+            dev.devicePath = devpath;
+            dev.deviceFile = INVALID_HANDLE_VALUE;
             if (theKeeper->fDevices.find(dev.locationInfo) == theKeeper->fDevices.end()) {
                 theKeeper->fDevices.insert(std::make_pair(dev.locationInfo, dev));
                 if (theKeeper->fUsedDevice == dev.locationInfo && theKeeper->fWaitReconnect) {
@@ -583,13 +589,15 @@ bool LinkKeeper::processDeviceNotification(const char* devpath, const GUID* guid
                 }
             }
         } else {
-            if (theKeeper->fUsedDevice == dev.locationInfo && theKeeper->fWaitReconnect == false) {
-                theKeeper->fUsedDevice.clear();
-            }
-            JLinkDevMap::iterator it = theKeeper->fDevices.find(dev.locationInfo);
-            if (it != theKeeper->fDevices.end()) {
-                it->second.close();
-                theKeeper->fDevices.erase(dev.locationInfo);
+            for (JLinkDevMap::iterator it = theKeeper->fDevices.begin(); it != theKeeper->fDevices.end(); it++) {
+                if (_stricmp(it->second.devicePath.c_str(), devpath) == 0) {
+                    if (theKeeper->fUsedDevice == it->second.locationInfo && theKeeper->fWaitReconnect == false) {
+                        theKeeper->fUsedDevice.clear();
+                    }
+                    it->second.close();
+                    theKeeper->fDevices.erase(it);
+                    break;
+                }
             }
         }
     }
@@ -718,6 +726,15 @@ bool LinkKeeper::commandReadUID(uint32_t* size, void* dataBuffer)
     JlinkDevice* dev = theKeeper->getCurrDevice();
     if (dev) {
         return jlinkCommandReadUID(dev, size, dataBuffer);
+    }
+    return false;
+}
+
+bool LinkKeeper::commandReadOTSX(void* dataBuffer)
+{
+    JlinkDevice* dev = theKeeper->getCurrDevice();
+    if (dev) {
+        return jlinkCommandReadOTSX(dev, dataBuffer);
     }
     return false;
 }
@@ -1027,7 +1044,7 @@ bool jlinkCommandReadUID(JlinkDevice* dev, uint32_t* size, void* dataBuffer)
     return jlinkContinueReadResult(dev, dataBuffer, leftLength);
 }
 
-bool jlinkCommandReadOTS(JlinkDevice* dev, void* dataBuffer)
+bool jlinkCommandReadOTSX(JlinkDevice* dev, void* dataBuffer)
 {
     uint8_t commandBuffer[14] = {
         0x16,
@@ -1041,4 +1058,11 @@ bool jlinkCommandReadOTS(JlinkDevice* dev, void* dataBuffer)
         return false;
 
     return jlinkContinueReadResult(dev, dataBuffer, leftLength);
+}
+
+bool jlinkCommandReadOTS(JlinkDevice* dev, void* dataBuffer)
+{
+    uint8_t command = 0xE6;
+
+    return jlinkSendCommand(dev, &command, sizeof(command), dataBuffer, 0x100);
 }
