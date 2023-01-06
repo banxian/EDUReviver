@@ -612,7 +612,10 @@ bool is_offical_bootloader(const void* btl)
     *(uint32_t*)&buff[0x2FC] = 0x12345678; // CRP1
     memset(&buff[0x130], 0xFF, 0x70); // Banner
     buff[0x2F89] = '0'; // V10/V11
-    *(uint16_t*)&buff[0x2EA0] = 0xB120; // V12 CBZ patch
+    if (*(uint16_t*)&buff[0x2EA0] != 0xB120) {
+        printf("detected fake to12 Bootloader.\n");
+        *(uint16_t*)&buff[0x2EA0] = 0xB120; // V12 CBZ patch
+    }
     unsigned char digest[32];
     if (sha256(buff, 0x54F8, digest)) {
         unsigned char myhash[32] = {
