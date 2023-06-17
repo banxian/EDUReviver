@@ -107,16 +107,16 @@ bool download_file(const char* url, const char* path)
     return result;
 }
 
-int request_payload_online(int sn, const char* uid, const char* signature, const char* payloadname,  const char* payloadopt, char** reply, size_t* replylen)
+int request_payload_online(int sn, const char* hash, const char* signature, const char* payloadname,  const char* payloadopt, char** reply, size_t* replylen)
 {
     int retcode = 0;
     curl_global_init(CURL_GLOBAL_ALL);
     if (CURL* curl = curl_easy_init()) {
         payloadname = encode_query_string(payloadname);
         payloadopt = encode_query_string(payloadopt);
-        size_t reqlen = 128 + 512 + (payloadname?strlen(payloadname):0) + (payloadopt?strlen(payloadopt):0);
+        size_t reqlen = 128 + strlen(hash) + strlen(signature) + (payloadname?strlen(payloadname):0) + (payloadopt?strlen(payloadopt):0);
         char* req = (char*)malloc(reqlen);
-        reqlen = sprintf_s(req, reqlen, "sn=%d&uid=%s&signature=%s&payload=%s&opt=%s", sn, uid, signature, payloadname?payloadname:"", payloadopt?payloadopt:"");
+        reqlen = sprintf_s(req, reqlen, "sn=%d&hash=%s&signature=%s&payload=%s&opt=%s", sn, hash, signature, payloadname?payloadname:"", payloadopt?payloadopt:"");
         if (payloadname) {
             free((void*)payloadname);
         }
@@ -143,6 +143,10 @@ int request_payload_online(int sn, const char* uid, const char* signature, const
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buff);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
         //curl_easy_setopt(curl, CURLOPT_PROXY, "http://localhost:8802");
+        char agent[64];
+        DWORD dwVersion = GetVersion();
+        sprintf_s(agent, sizeof(agent), "EDUReViver/0.3.7 (Windows NT %d.%d)", (UCHAR)dwVersion, (UCHAR)(dwVersion >> 8));
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, agent);
         CURLcode res = curl_easy_perform(curl);
         free(req);
         if (res == CURLE_OK) {
@@ -177,7 +181,7 @@ bool os_is_reactos()
         } *lpTranslate;
         UINT cbTranslate;
         VerQueryValueA(info, "\\VarFileInfo\\Translation", (LPVOID*)&lpTranslate, &cbTranslate);
-        for( int i=0; i < (cbTranslate/sizeof(struct LANGANDCODEPAGE)); i++ ) {
+        for( UINT i=0; i < (cbTranslate/sizeof(struct LANGANDCODEPAGE)); i++ ) {
             char path[100];
             sprintf_s(path, "\\StringFileInfo\\%04x%04x\\ProductName", lpTranslate[i].wLanguage, lpTranslate[i].wCodePage);
             char* name;
@@ -207,13 +211,16 @@ bool os_have_sni()
     osvi.dwMajorVersion = 6;
     DWORDLONG conditionmask = 0;
     VER_SET_CONDITION( conditionmask, VER_MAJORVERSION, VER_GREATER_EQUAL );
-    return VerifyVersionInfoA(&osvi, VER_MAJORVERSION, conditionmask);
+    return !!VerifyVersionInfoA(&osvi, VER_MAJORVERSION, conditionmask);
 }
 
-int request_payload_online(int sn, const char* uid, const char* signature, const char* payloadname,  const char* payloadopt, char** reply, size_t* replylen)
+int request_payload_online(int sn, const char* hash, const char* signature, const char* payloadname,  const char* payloadopt, char** reply, size_t* replylen)
 {
     int retcode = 0;
-    HINTERNET internet = InternetOpenA("EDUReViver/0.3.6", 0, 0, 0, 0);
+    char agent[64];
+    DWORD dwVersion = GetVersion();
+    sprintf_s(agent, sizeof(agent), "EDUReViver/0.3.7 (Windows NT %d.%d)", (UCHAR)dwVersion, (UCHAR)(dwVersion >> 8));
+    HINTERNET internet = InternetOpenA(agent, 0, 0, 0, 0);
     if (internet) {
         bool havesni = os_have_sni();
         if (HINTERNET connect = InternetConnectA(internet, apphost, havesni?INTERNET_DEFAULT_HTTPS_PORT:INTERNET_DEFAULT_HTTP_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0)) {
@@ -224,9 +231,9 @@ int request_payload_online(int sn, const char* uid, const char* signature, const
             if (HINTERNET request = HttpOpenRequestA(connect, "POST", "jlink/payload2.php", NULL, NULL, NULL, flags, 0)) {
                 payloadname = encode_query_string(payloadname);
                 payloadopt = encode_query_string(payloadopt);
-                size_t reqlen = 128 + 512 + (payloadname?strlen(payloadname):0) + (payloadopt?strlen(payloadopt):0);
+                size_t reqlen = 128 + strlen(hash) + strlen(signature) + (payloadname?strlen(payloadname):0) + (payloadopt?strlen(payloadopt):0);
                 char* req = (char*)malloc(reqlen);
-                reqlen = sprintf_s(req, reqlen, "sn=%d&uid=%s&signature=%s&payload=%s&opt=%s", sn, uid, signature, payloadname?payloadname:"", payloadopt?payloadopt:"");
+                reqlen = sprintf_s(req, reqlen, "sn=%d&hash=%s&signature=%s&payload=%s&opt=%s", sn, hash, signature, payloadname?payloadname:"", payloadopt?payloadopt:"");
                 if (payloadname) {
                     free((void*)payloadname);
                 }
@@ -260,13 +267,13 @@ int request_payload_online(int sn, const char* uid, const char* signature, const
                             }
                         }
                     } else if (statuscode == HTTP_STATUS_OK) {
-                        fprintf(stderr, "Error %lu in HttpQueryInfo.\n", GetLastError());
+                        errprintf("Error %u in HttpQueryInfo.\n", GetLastError());
                         retcode = -5;
                     } else {
-                        fprintf(stderr, "HTTP error %lu by HttpQueryInfo.\n", statuscode);
+                        errprintf("HTTP error %u by HttpQueryInfo.\n", statuscode);
                     }
                 } else {
-                    fprintf(stderr, "Error %lu in HttpOpenRequest.\n", GetLastError());
+                    errprintf("Error %u in HttpOpenRequest.\n", GetLastError());
                     retcode = -4;
                 }
                 free(req);
