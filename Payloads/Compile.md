@@ -3,7 +3,7 @@ Payloads for J-Link v10/v11
 
 How to compile
 --------------
-1 Install MDK
+1 Install MDK with LPC4300 DFP.
 
 2 Create a project, select LPC4322:CortexM4 as device.
 
@@ -11,13 +11,15 @@ How to compile
 
 4 add one payload source in to project.
 
-5 (not necessary) change IROM to 0x1A000000:0x80000 and IRAM to 0x10000000:0x8000
+5 add after build step to save bin file: $K\ARM\ARMCC\bin\fromelf.exe --bin --output=Objects\@L.bin !L
+
+6 (optional) change IROM to 0x20000050:0x800 and IRAM to 0x10000000:0x8000
 
 How to write payloads
 ---------------------
-your payload binary will copied to 0x20000050 and execute on Cortex-M4.
+your payload binary will copied to sram 0x20000050 and execute on Cortex-M4.
 
-by change m4rxret in EDUReviver, you can place your code in to 0x10000048, too.
+by change m4rxret template in EDUReviver, you can place your code in to 0x10000048, too.
 
 you can use one of source file in this directory as template.
 

@@ -111,7 +111,7 @@ void __main(void)
         int i, j;
         wmemcpy((uint32_t*)pagecache, (void*)0x1A005E00, 0x200 / 4);
         // Cleanup all feathers
-        wmemset((uint32_t*)&pagecache[0x20], 0xFFFFFFFF, 0xD0 / 4); // 5E20
+        wmemset((uint32_t*)&pagecache[0x20], 0xFFFFFFFF, 0x80 / 4); // 5E20~5EA0
 
         for(i = 0; i < 8; i++, src += 0x10) {
             _Bool bad = false;
