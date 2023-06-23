@@ -103,7 +103,7 @@ void __main(void)
     if (*(uint32_t*)0x1A0002FC != CRP1 && *(uint32_t*)0x1A005E04 == 0x32051976) {
         wmemcpy((uint32_t*)pagecache, (void*)0x1A000200, 0x200 / 4);
         *(uint32_t*)(&pagecache[0xFC]) = CRP1; // 1A0002FC
-        writeflashpage(0x1A000200, pagecache);
+        writeflashpage(0x1A000200, pagecache); // IAP commands are not affected by the code read protection.
     }
     __enable_irq();
     return;

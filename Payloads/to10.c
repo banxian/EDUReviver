@@ -89,7 +89,7 @@ char writeflashpage(uint32_t destaddr, const void* src)
     } else {
         //printf("Prepare erase failed: %d\n", status[0]);
     }
-	return flashok;
+    return flashok;
 }
 
 #define CRP1 0x12345678
@@ -103,6 +103,9 @@ void __main(void)
     if ((*(uint8_t*)0x1A002F89 == '1' || *(uint8_t*)0x1A002F89 == '2') && *(uint32_t*)0x1A005E04 == 0x32051976) {
         wmemcpy((uint32_t*)pagecache, (void*)0x1A002E00, 0x200 / 4);
         pagecache[0x189] = '0'; // 1A002F89
+        if (*(uint16_t*)0x1A002EA0 == 0xB000) {
+            *(uint16_t*)&pagecache[0xA0] = 0xB120; // 0x1A002EA0 CBZ
+        }
         writeflashpage(0x1A002E00, pagecache);
         
         wmemcpy((uint32_t*)pagecache, (void*)0x1A000000, 0x200 / 4);

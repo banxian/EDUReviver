@@ -2,7 +2,7 @@
 #include "LPC43xx.h"
 
 
-volatile uint32_t btl_magic __attribute__((at(0x20000000)));
+volatile uint32_t btl_magic __attribute__((section(".ARM.__at_0x20000000")));
 
 //__no_init char iapmem[16] @ 0x10089FF0;
 
@@ -89,20 +89,45 @@ char writeflashpage(uint32_t destaddr, const void* src)
     } else {
         //printf("Prepare erase failed: %d\n", status[0]);
     }
-	return flashok;
+    return flashok;
 }
 
-#define CRP1 0x12345678
+struct lenstr
+{
+    char body[7];
+    char len;
+};
 
 void __main(void)
 {
     char pagecache[0x200]; // task stack
-    
+    struct lenstr badfeatures[4] = { "GDBFull", 7, "RDDI", 4, "JFlash", 5, "RDI", 3 };
+
     __disable_irq();
     FeedWWDT();
-    if (*(uint32_t*)0x1A005E40 != 0xFFFFFFFF && *(uint32_t*)0x1A005E04 == 0x32051976) {
+    if (*(uint32_t*)0x1A005E20 != 0xFFFFFFFF && *(uint32_t*)0x1A005E04 == 0x32051976) {
+        const char* src = (char*)0x1A005E20;
+        char* dest = &pagecache[0x20];
+        int i, j;
         wmemcpy((uint32_t*)pagecache, (void*)0x1A005E00, 0x200 / 4);
-        wmemset((uint32_t*)&pagecache[0x40], 0xFFFFFFFF, 0x60 / 4); // 1A005E40
+        // Cleanup all feathers
+        wmemset((uint32_t*)&pagecache[0x20], 0xFFFFFFFF, 0xD0 / 4); // 5E20
+
+        for(i = 0; i < 8; i++, src += 0x10) {
+            _Bool bad = false;
+            for (j = 0; j < 4; j++) {
+                if (!strncasecmp(src, badfeatures[j].body, badfeatures[j].len)) {
+                    bad = true;
+                    break;
+                }
+            }
+            if (bad) {
+                continue;
+            }
+            // only append features not in blacklist, line by line
+            wmemcpy((uint32_t*)dest, (uint32_t*)src, 0x10 / 4);
+            dest += 0x10;
+        }
         writeflashpage(0x1A005E00, pagecache);
     }
     __enable_irq();
