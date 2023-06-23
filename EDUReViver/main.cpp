@@ -21,6 +21,7 @@ uint32_t encode_fwLen(uint32_t fwlen);
 uint16_t crc16_kermit(const uint8_t *buf, size_t len);
 uint32_t calc_sn_checksum(uint32_t sn);
 uint32_t crc32_rev(uint8_t *buf, size_t len);
+bool sha1(const void* buff, size_t buflen, void* digest);
 // check
 bool is_BTL_version(const char* fwversion);
 bool is_offical_bootloader(const void* btl);
@@ -64,7 +65,7 @@ cmd_fine_write_read* assembly_cmd_payload(int* cmdlen, const void* payload, size
 
 cmd_fine_write_read* assembly_cmd_payload(int* cmdlen, const void* payload, size_t payloadlen, const patcher_config* config, size_t readlen)
 {
-    size_t newlen = config->isSES?(config->nopad?sizeof(cmd_fine_write_read_SES_new):sizeof(cmd_fine_write_read_SES)):sizeof(cmd_fine_write_read_IAR); // 38+1, 44+1
+    size_t newlen = config->isSES?(sizeof(cmd_fine_write_read) + config->endgap + 4*config->regCnt+4):sizeof(cmd_fine_write_read_IAR); // 38+1, 44+1
     size_t payloadoffset = (uint32_t)&((cmd_fine_write_read*)0)->somelen;
     if (payloadoffset + payloadlen > newlen) {
         newlen = payloadoffset + payloadlen; // overlay
@@ -77,24 +78,14 @@ cmd_fine_write_read* assembly_cmd_payload(int* cmdlen, const void* payload, size
     cmd->writelen = newlen - 1 - 0xC; // 2C/38/34
     cmd->readlen = readlen;
     memcpy((char*)cmd + payloadoffset, payload, payloadlen); // 发送后40B0处是我们代码
+    uint32_t endtolr = 0;
     if (config->isSES) {
-        if (config->nopad) {
-            cmd_fine_write_read_SES_new* ses = (cmd_fine_write_read_SES_new*)cmd;
-            ses->regLR = config->sp + 0x8 | 1; // BLX rxbuf时SP
-            ses->R4 = config->R4;
-            ses->R5 = config->R5;
-            ses->R6 = config->R6;
-        } else {
-            cmd_fine_write_read_SES* ses = (cmd_fine_write_read_SES*)cmd;
-            ses->regLR = config->sp + 0xC | 1;
-            ses->R4 = config->R4;
-            ses->R5 = config->R5;
-            ses->R6 = config->R6;
-        }
+        endtolr = 4 * config->regCnt + config->endgap;
+        memcpy((char*)(cmd + 1) + config->endgap, config->regs, 4 * config->regCnt);
     } else {
-        cmd_fine_write_read_IAR* iar = (cmd_fine_write_read_IAR*)cmd;
-        iar->regLR = config->sp + 0x10 | 1; // sp是BL rxbuf时候值. +4&readed,+8&arg,+10指向&somelen(payload入口点)
+        endtolr = 4;
     }
+    *(uint32_t*)((uint32_t)(cmd + 1) + endtolr) = config->sptop + 8 | 1; // sp是rxbuf时候(&arg), +8指向&somelen(payload入口点)
     return cmd;
 }
 
@@ -105,9 +96,11 @@ enum payloadmode {
     pmM0Boot    // m0patcher + uxbrx,m0boot
 };
 
-
-#define CLOSE_AND_EXIT(code) UnloadWinusb();\
+#define CLOSE_AND_EXIT(code) shutdownKeeper();\
+    UnloadWinusb();\
     return code;
+
+#define IMM32(x) uint8_t(x), uint8_t((x) >> 8), uint8_t((x) >> 16), (x) >> 24
 
 void printmismatch(const char* name, bool mismatch)
 {
@@ -165,9 +158,9 @@ int main(int argc, char * argv[])
         errprintf("Failed to find device!\n");
         CLOSE_AND_EXIT(0);
     } else if (infovec.size() > 1) {
-        int i = 1;
+        size_t i = 1;
         for (JLinkInfoVec::const_iterator it = infovec.begin(); it != infovec.end(); it++, i++) {
-            printf("%d: %s [%d] sn %d%s\n", i, it->locationInfo.hubName.c_str(), it->locationInfo.devPort, it->winSerial, it->isWinusb?" WinUSB":"");
+            printf("%u: %s [%d] sn %d%s\n", i, it->locationInfo.hubName.c_str(), it->locationInfo.devPort, it->winSerial, it->isWinusb?" WinUSB":"");
         }
         printf("Input device index: ");
         scanf_s("%d", &i);
@@ -188,11 +181,13 @@ int main(int argc, char * argv[])
     dataBuffer[0x70] = 0;
     //isv9 = strstr((const char*)dataBuffer, "V9") != 0;
     isv10 = (strstr((const char*)dataBuffer, "V10") != 0) || (strstr((const char*)dataBuffer, "V11") != 0) || (strstr((const char*)dataBuffer, "V12") != 0);
-    if (is_BTL_version((char*)dataBuffer)) {
+    uint32_t hwversion;
+    LinkKeeper::commandGetHWVersion(&hwversion);
+    if (is_BTL_version((char*)dataBuffer) || hwversion == 0) {
         errprintf("Please quit Bootloader mode.\n");
         CLOSE_AND_EXIT(0);
     } else {
-        printf("Firmware Version: %s\n", dataBuffer);
+        printf("Firmware Version: %s, Hardware Version: %d\n", dataBuffer, hwversion);
     }
     if (isv10 == false) {
         errprintf("Only support v10,v11,v12 devices.\n");
@@ -201,12 +196,13 @@ int main(int argc, char * argv[])
     // check genuine hardware
     const patcher_config* config = find_patcher_config((char*)dataBuffer);
     uint32_t sn, snchecksum;
-    uint8_t snuidbuf[36];
+    uint8_t snuidbuf[36]; // max 4+32 infact 4+16
     void* otssign;
     bool sncheckerror = true;
     bool touchfeatures = _stricmp(payloadname, "revive") == 0;
     bool touchsn = _stricmp(payloadname, "setsn") == 0;
     bool touchcrp = _stricmp(payloadname, "swd") == 0;
+    bool touchbl = _stricmp(payloadname, "to10") == 0 || _stricmp(payloadname, "to11") == 0 || _stricmp(payloadname, "to12") == 0;
     if (LinkKeeper::commandReadOTSX(dataBuffer)) {
         sn = *(uint32_t*)dataBuffer;
         snchecksum = *(uint32_t*)(dataBuffer + 4);
@@ -224,23 +220,25 @@ int main(int argc, char * argv[])
     void* myapp = 0;
     int applen = 0;
     if (LinkKeeper::commandReadUID(&uidlen, &snuidbuf[4])) {
-        char* uidstr = base64_encode(&snuidbuf[4], uidlen);
+        uint8_t snuiddigest[20];
+        sha1(snuidbuf, 4 + uidlen, snuiddigest);
+        char* hashstr = base64_encode(snuiddigest, sizeof(snuiddigest));
         char* signstr = base64_encode((uint8_t*)otssign, 0x100);
         char* reply = 0;
         size_t replylen = 0;
-        int reqret = request_payload_online(sn, uidstr, signstr, payloadname, payloadopt, &reply, &replylen);
+        int reqret = request_payload_online(sn, hashstr, signstr, payloadname, payloadopt, &reply, &replylen);
         if (payloadopt) {
             free(payloadopt);
         }
-        if (uidstr) {
-            free(uidstr);
+        if (hashstr) {
+            free(hashstr);
         }
         if (signstr) {
             free(signstr);
         }
         if (reqret == 0 && replylen >= 8) {
-            int otsmatched = *(int32_t*)reply;
-            mode = *(int32_t*)(reply + 4);
+            int otsmatched = *(int32_t*)reply; // hash matches otssign?
+            mode = *(int32_t*)(reply + 4); // payload mode
             applen = replylen - 8;
             if (applen) {
                 myapp = malloc(applen);
@@ -262,43 +260,52 @@ int main(int argc, char * argv[])
         errprintf("Reading UID failed!\n");
         CLOSE_AND_EXIT(0);
     }
-    uint32_t dumpsize = config?0x8000:0x80000;
-    // dump bootloader/firmware and parse
-    char* fwdump = (char*)malloc(dumpsize);
-    if (LinkKeeper::dumpFullFirmware(0x1A000000, dumpsize, fwdump)) {
-        bool bootloaderok = is_offical_bootloader(fwdump);
-        if (touchcrp) {
-            printCRPlevel(*(uint32_t*)&fwdump[0x2FC]);
-        }
-        if (sn == -1 || sncheckerror || bootloaderok == false || otssignok == false) {
-            errprintf("Detected clone.\n");
+    if (myapp == 0) {
+        errprintf("Payload \"%s\" was not found on server!\n", payloadname);
+        CLOSE_AND_EXIT(0);
+    }
+    // 如补丁bootloader需要获取bootloader检查能否经受补丁, 如没有找到config还需要获取firmware
+    if (touchbl || config == 0) {
+        // dump bootloader/firmware and parse
+        // TODO: bypass bootloader dump if not touchbl
+        //uint32_t dumpaddr = touchbl?0x1A000000:0x1A008000;
+        uint32_t dumpsize = config?0x8000:0x80000;
+        char* fwdump = (char*)malloc(dumpsize);
+        if (LinkKeeper::dumpFullFirmware(0x1A000000, dumpsize, fwdump)) {
+            bool bootloaderok = touchbl?is_offical_bootloader(fwdump):true;
+            if (touchcrp) {
+                printf("old CRP Level: ");
+                printCRPlevel(*(uint32_t*)&fwdump[0x2FC]);
+            }
+            if (sn == -1 || sncheckerror || bootloaderok == false || otssignok == false) {
+                errprintf("Detected clone.\n");
 #ifdef DENYCLONE
+                free(fwdump);
+                if (myapp) {
+                    free(myapp);
+                }
+                CLOSE_AND_EXIT(0);
+#endif
+            }
+        } else {
             free(fwdump);
+            errprintf("Dumping failed. Can't check device's genuine.\n");
             if (myapp) {
                 free(myapp);
             }
             CLOSE_AND_EXIT(0);
-#endif
         }
-    } else {
-        free(fwdump);
-        errprintf("Dumping failed. Can't check device's genuine.\n");
-        if (myapp) {
-            free(myapp);
-        }
-        CLOSE_AND_EXIT(0);
-    }
-    if (myapp == 0) {
-        errprintf("Payload \"%s\" was not found on server!\n", payloadname);
-        free(fwdump);
-        CLOSE_AND_EXIT(0);
-    }
-
-    if (config == 0) {
         printf("Your version number is not present in config cache! Analyst it now...\n");
         config = analyst_firmware_stack(fwdump + 0x8000, 0x78000);
+        free(fwdump);
+    } else if (touchcrp) {
+        uint32_t crp;
+        if (LinkKeeper::dumpFullFirmware(0x1A0002FC, 4, &crp)) {
+            printf("old CRP Level: ");
+            printCRPlevel(crp);
+        }
     }
-    free(fwdump);
+
     if (config == NULL) {
         free(myapp);
         CLOSE_AND_EXIT(0);
@@ -306,7 +313,7 @@ int main(int argc, char * argv[])
 
     uint32_t oldif;
     if (LinkKeeper::commandSendSelectInterface(3, &oldif)) {
-        printf("Change interface: %d -> 3\n", oldif);
+        printf("Select FINE interface: %d -> 3\n", oldif);
     } else {
         errprintf("Select interface failed!\n");
         free(myapp);
@@ -316,40 +323,32 @@ int main(int argc, char * argv[])
     bool M0patched = false;
     int cmdlen;
     uint32_t readed; // FINE采样字节数, m0app设置
-    // remotebuf 前4字节在设备会被填充readed, 因此不能放代码, 4+writebuf和remotebuf-4各可以放0x14大小代码
+    // somelen(4)+writebuf(0x10) 可放14
+    // replybuf 前4字节在设备会被填充readed, 因此不能放代码, 有效长度10, 在IAR版末尾送了4字节对齐, 有效长度14
     // 此处代码要注意执行时候sp是100840E0(是LR末尾), 如有push会首先破坏LR位置,再继续往前破坏可能破坏自身
-    // SES的代码局部变量readed会额外填充+28空隙, 导致第二段要拆分出来一个literal放入R4-R6区域
-    if (mode == pmM4Ret && (config->isSES == false || (config->cmdReg >= 4 && config->cmdReg <= 6))) {
+    // SES的代码会入栈R4~R6, 布局改变导致Replybuf附赠4字节对齐没了. 如果使用2C的单次代码需要借用cmdreg做单独literal
+    if (mode == pmM4Ret) {
         // 单次溢出
         cmd_fine_write_read* m4rxcmd;
-        if (config->isSES) {
-            // SES版+2C是R4位置, SES新版+28就是R4位置, 此代码有效长度2C(28+4)
-            unsigned char m4rxret[0x30] = {
-                0x8C, 0xB0, 0x0A, 0x48, 0x4F, 0xF4, 0x00, 0x61, 0x05, 0x4A, 0x90, 0x47, 0x07, 0x48, 0x01, 0x30,
-                0x80, 0x47, 0x01, 0xE0, 0xFF, 0xFF, 0xFF, 0xFF, 0x0C, 0xB0, 0xDF, 0xF8, 0x08, 0xF0, 0x00, 0x00,
-                0xDB, 0x0E, 0x01, 0x1A, 0x19, 0x07, 0x01, 0x1A, 0xFF, 0xFF, 0xFF, 0xFF, 0x50, 0x00, 0x00, 0x20
-            };
-            *(uint32_t*)&m4rxret[0x20] = config->usbrx | 1;
-            *(uint32_t*)&m4rxret[0x24] = config->lr | 1; // 要返回dispatchcmd
-            // 孤单literal的重定位
-            m4rxret[0x2] += config->cmdReg - (config->nopad?5:4);
-            m4rxret[0xC] += config->cmdReg - (config->nopad?5:4);
-            m4rxcmd = assembly_cmd_payload(&cmdlen, m4rxret, sizeof(m4rxret)-8, config, 0);
-            if (config->nopad) {
-                *(&((cmd_fine_write_read_SES_new*)m4rxcmd)->R4 + config->cmdReg - 4) = *(uint32_t*)&m4rxret[0x2C]; // literal
-            } else {
-                *(&((cmd_fine_write_read_SES*)m4rxcmd)->R4 + config->cmdReg - 4) = *(uint32_t*)&m4rxret[0x2C]; // literal
-            }
-        } else {
-            unsigned char m4rxret[0x2C] = {
-                0x8C, 0xB0, 0x07, 0x48, 0x4F, 0xF4, 0x00, 0x61, 0x06, 0x4A, 0x90, 0x47, 0x04, 0x48, 0x01, 0x30,
-                0x80, 0x47, 0x01, 0xE0, 0xFF, 0xFF, 0xFF, 0xFF, 0x0C, 0xB0, 0xDF, 0xF8, 0x0C, 0xF0, 0x00, 0x00,
-                0x50, 0x00, 0x00, 0x20, 0xDB, 0x0E, 0x01, 0x1A, 0x19, 0x07, 0x01, 0x1A 
-            };
-            *(uint32_t*)&m4rxret[0x24] = config->usbrx | 1;
-            *(uint32_t*)&m4rxret[0x28] = config->lr | 1; // 要返回dispatchcmd
-            m4rxcmd = assembly_cmd_payload(&cmdlen, m4rxret, sizeof(m4rxret), config, 0);
-        }
+        // 此代码长度28, 内含4字节无用readed
+        unsigned char m4rxret[0x28] = {
+            0x8C, 0xB0,             // SUB     SP, #0x30
+            0x05, 0x48,             // LDR     R0, =0x20000050
+            0x81, 0x0C,             // LSRS    R1, R0, #18      ; (2000>>2=800)
+            0x06, 0x4A,             // LDR     R2, =0x1A010EDB
+            0x90, 0x47,             // BLX     R2               ; usbrxbuf(rxdest,0x800)
+            0x03, 0x48,             // LDR     R0, =0x20000050  ; myadpp = rxdest|1
+            0x01, 0x30,             // ADDS    R0, #1
+            0x80, 0x47,             // BLX     R0               ; myapp()
+            0x0C, 0xB0,             // ADD     SP, #0x30
+            0x03, 0xE0,             // B       .+10
+            IMM32(0x002eaded),      // replybuf[readlen]=readed
+            IMM32(0x20000050),      // rxdest
+            0xDF, 0xF8, 0x04, 0xF0, // LDR.W   PC, =0x1A010719  ; return to original LR
+            IMM32(config->usbrx|1), // usbrxbuf
+            IMM32(config->lr|1),    // original LR in dispatchcmd/taskmain
+        };
+        m4rxcmd = assembly_cmd_payload(&cmdlen, m4rxret, sizeof(m4rxret), config, 0);
         LinkKeeper::sendCommand(m4rxcmd, cmdlen, &readed, sizeof(readed));
         free(m4rxcmd);
     } else {
@@ -429,9 +428,9 @@ int main(int argc, char * argv[])
     free(myapp);
     // 清理步骤, 如果打过M0补丁, 则恢复补丁, 重启版除外, 等他重启
     if (M0patched && mode != pmM4Reset) {
-        uint32_t oldif2;
-        if (LinkKeeper::commandSendSelectInterface(oldif, &oldif2)) {
-            printf("Change interface: %d -> %d\n", oldif2, oldif);
+        uint32_t if3;
+        if (LinkKeeper::commandSendSelectInterface(oldif, &if3)) {
+            printf("Restore interface: %d -> %d\n", if3, oldif);
         } else {
             errprintf("Select interface failed!\n");
             CLOSE_AND_EXIT(0);
@@ -467,6 +466,7 @@ int main(int argc, char * argv[])
     if (touchcrp) {
         uint32_t crp;
         if (LinkKeeper::dumpFullFirmware(0x1A0002FC, 4, &crp)) {
+            printf("new CRP Level: ");
             printCRPlevel(crp);
         }
     }
@@ -542,6 +542,26 @@ bool sha256(char* buff, size_t buflen, void* digest)
     return ok;
 }
 
+bool sha1(const void* buff, size_t buflen, void* digest)
+{
+    bool ok = false;
+    HCRYPTPROV provider;
+    HCRYPTHASH hash;
+    if (CryptAcquireContext(&provider, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)) {
+        if (CryptCreateHash(provider, CALG_SHA1, 0, 0, &hash)) {
+            if (CryptHashData(hash, (BYTE*)buff, buflen, 0)) {
+                DWORD digestlen = 20;
+                if (CryptGetHashParam(hash, HP_HASHVAL, (BYTE*)digest, &digestlen, 0)) {
+                    ok = true;
+                }
+            }
+        }
+    }
+    CryptDestroyHash(hash);
+    CryptReleaseContext(provider, 0);
+    return ok;
+}
+
 bool aes_256_cbc_encrypt(const uint8_t* key, const uint8_t* iv, uint8_t* buff, size_t buflen)
 {
     bool ok = false;
@@ -607,22 +627,35 @@ char* base64_encode(const uint8_t* value, size_t valuelen)
 bool is_offical_bootloader(const void* btl)
 {
     bool matched = false;
-    char* buff = (char*)malloc(0x54F8);
-    memcpy(buff, btl, 0x54F8);
+    bool pre2019 = (*(uint32_t*)btl + 1) == 0x1A0053E1;
+    const uint16_t blsize = pre2019?0x54F8:0x5D1C;
+    char* buff = (char*)malloc(blsize);
+    memcpy(buff, btl, blsize);
     *(uint32_t*)&buff[0x2FC] = 0x12345678; // CRP1
     memset(&buff[0x130], 0xFF, 0x70); // Banner
-    buff[0x2F89] = '0'; // V10/V11
-    if (*(uint16_t*)&buff[0x2EA0] != 0xB120) {
+    if (pre2019) {
+        buff[0x2F89] = '0'; // V10/V11
+    } else {
+        buff[0x5CB1] = '2'; // V12
+    }
+    if (pre2019 && *(uint16_t*)&buff[0x2EA0] != 0xB120) {
         printf("detected fake to12 Bootloader.\n");
-        *(uint16_t*)&buff[0x2EA0] = 0xB120; // V12 CBZ patch
+        *(uint16_t*)&buff[0x2EA0] = 0xB120; // V10/V11 CBZ patch
+    }
+    if (!pre2019 && *(uint16_t*)&buff[0x469C] != 0xDB09) {
+        *(uint16_t*)&buff[0x469C] = 0xDB09; // V12 BLT patch
     }
     unsigned char digest[32];
-    if (sha256(buff, 0x54F8, digest)) {
+    if (sha256(buff, blsize, digest)) {
         unsigned char myhash[32] = {
             0x67, 0x90, 0xD1, 0xB9, 0x03, 0x2F, 0x1A, 0x89, 0x0D, 0xE0, 0xB4, 0x56, 0x56, 0x33, 0xE9, 0x79,
             0xC7, 0x82, 0x71, 0x13, 0xB3, 0x28, 0x28, 0x6A, 0xD4, 0xE9, 0xC1, 0x70, 0xE5, 0x3E, 0xB7, 0x47 
         };
-        matched = memcmp(digest, myhash, sizeof(myhash)) == 0;
+        unsigned char v12hash[32] = {
+            0xBD, 0xFB, 0x89, 0x29, 0xA1, 0x08, 0xF4, 0x75, 0x9C, 0x70, 0x12, 0x3E, 0x24, 0x89, 0xBB, 0x6F,
+            0xA4, 0x78, 0xC2, 0x62, 0x8D, 0x49, 0x6B, 0xDF, 0x8E, 0xE4, 0xB6, 0x2A, 0xB2, 0xED, 0xBA, 0xB8 
+        };
+        matched = memcmp(digest, myhash, sizeof(myhash)) == 0 || memcmp(digest, v12hash, sizeof(v12hash)) == 0;
     }
     free(buff);
     return matched;

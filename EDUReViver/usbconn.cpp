@@ -137,16 +137,28 @@ void JlinkDevice::open()
             CHAR rawio = TRUE;
             WinUsb_SetPipePolicy(winusbHandle, outep, RAW_IO, sizeof(rawio), &rawio);
             WinUsb_SetPipePolicy(winusbHandle, inep, RAW_IO, sizeof(rawio), &rawio);
-            //ULONG transize;
-            //ULONG transizelen = sizeof(transize);
-            //WinUsb_GetPipePolicy(winusbHandle, outep, MAXIMUM_TRANSFER_SIZE, &transizelen, &transize);
-            //transizelen = sizeof(transize);
-            //WinUsb_GetPipePolicy(winusbHandle, inep, MAXIMUM_TRANSFER_SIZE, &transizelen, &transize);
-            WINUSB_SETUP_PACKET setup = {0x41, 0x01, 0x0040, 0x0000, 0x0000};
+            ULONG transizelen = sizeof(DWORD);
+            if (!WinUsb_GetPipePolicy(winusbHandle, outep, MAXIMUM_TRANSFER_SIZE, &transizelen, &this->writeSize)) {
+                this->writeSize = 2048; // default 2K, real 2M
+            }
+            ULONG readsize;
+            transizelen = sizeof(DWORD);
+            if (!WinUsb_GetPipePolicy(winusbHandle, inep, MAXIMUM_TRANSFER_SIZE, &transizelen, &readsize)) {
+                readsize = 2048;
+            }
+            if (readsize > 65536) {
+                readsize = 65536;
+            }
+            // 2K~8K  =800~2000
+            // 16K~64K=10~40
+            USHORT value = (USHORT)(readsize>=16384?readsize/1024:readsize);
+            WINUSB_SETUP_PACKET setup = {0x41, 0x01, value, 0x0000, 0x0000};
             ULONG transfered = 0;
             if (!WinUsb_ControlTransfer(winusbHandle, setup, NULL, 0, &transfered, NULL)) {
                 printf("Fail to invoke WinUsb_ControlTransfer, last error %lu\n", GetLastError());
+                readsize = 2048;
             }
+            this->readSize = readsize;
             DWORD timeout = 1000;
             WinUsb_SetPipePolicy(winusbHandle, outep, PIPE_TRANSFER_TIMEOUT, sizeof(timeout), &timeout);
             WinUsb_SetPipePolicy(winusbHandle, inep, PIPE_TRANSFER_TIMEOUT, sizeof(timeout), &timeout);
@@ -181,6 +193,8 @@ void JlinkDevice::open()
                 CloseHandle(readPipeFile);
                 return;
             }
+            DeviceIoControl(deviceFile, 0x220460, NULL, 0, &this->readSize, sizeof(DWORD), NULL, NULL);
+            DeviceIoControl(deviceFile, 0x220464, NULL, 0, &this->writeSize, sizeof(DWORD), NULL, NULL);
 
             this->deviceFile = deviceFile;
             this->readPipeFile = readPipeFile;
@@ -191,15 +205,15 @@ void JlinkDevice::open()
 
 void JlinkDevice::close()
 {
-    if (deviceFile != INVALID_HANDLE_VALUE) {
+    HANDLE handle = (HANDLE)InterlockedExchange((LONG*)&deviceFile, (LONG)INVALID_HANDLE_VALUE);
+    if (handle != INVALID_HANDLE_VALUE) {
         if (isWinusb) {
             WinUsb_Free(interfaceHandle);
         } else {
             CloseHandle(readPipeFile);
             CloseHandle(writePipeFile);
         }
-        CloseHandle(deviceFile);
-        deviceFile = INVALID_HANDLE_VALUE;
+        CloseHandle(handle);
         g_recvpos = 0;
     }
 }
@@ -573,6 +587,10 @@ JlinkDevice* LinkKeeper::getCurrDevice()
 bool LinkKeeper::processDeviceNotification(const char* devpath, const GUID* guid, bool add)
 {
     // 设备拔除时候, 已经无法正常解析ID等信息, 可适配的就是devpath
+    // main里面如果已经shutdownKeeper, 那么theKepper就是0了
+    if (theKeeper == 0) {
+        return false;
+    }
     bool issegger2 = memcmp(guid, &seggerguid2, sizeof(seggerguid2)) == 0;
     bool iswinusb2 = memcmp(guid, &winusbguid2, sizeof(winusbguid2)) == 0;
     if (issegger2 || iswinusb2) {
@@ -640,19 +658,17 @@ bool LinkKeeper::waitReconnect(uint32_t timeout, uint32_t step)
     return !theKeeper->fWaitReconnect;
 }
 
-bool LinkKeeper::sendCommand(void const* commandBuffer, uint32_t commandLength, void* resultBuffer, uint32_t resultHeaderLength)
+bool LinkKeeper::sendCommand(void const* commandBuffer, uint32_t commandLength, void* resultBuffer, uint32_t resultBufferLength)
 {
-    JlinkDevice* dev = theKeeper->getCurrDevice();
-    if (dev) {
-        return jlinkSendCommand(dev, commandBuffer, commandLength, resultBuffer, resultHeaderLength);
+    if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
+        return jlinkSendCommand(dev, commandBuffer, commandLength, resultBuffer, resultBufferLength);
     }
     return false;
 }
 
 bool LinkKeeper::continueReadResult(void* resultBuffer, uint32_t resultLength)
 {
-    JlinkDevice* dev = theKeeper->getCurrDevice();
-    if (dev) {
+    if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
         return jlinkContinueReadResult(dev, resultBuffer, resultLength);
     }
     return false;
@@ -660,8 +676,7 @@ bool LinkKeeper::continueReadResult(void* resultBuffer, uint32_t resultLength)
 
 bool LinkKeeper::commandReadFirmwareVersion(void* dataBuffer)
 {
-    JlinkDevice* dev = theKeeper->getCurrDevice();
-    if (dev) {
+    if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
         return jlinkCommandReadFirmwareVersion(dev, dataBuffer);
     }
     return false;
@@ -669,8 +684,7 @@ bool LinkKeeper::commandReadFirmwareVersion(void* dataBuffer)
 
 bool LinkKeeper::loopReadFirmwareVersion(void* dataBuffer)
 {
-    JlinkDevice* dev = theKeeper->getCurrDevice();
-    if (dev) {
+    if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
         return jlinkLoopReadFirmwareVersion(dev, dataBuffer);
     }
     return false;
@@ -678,8 +692,7 @@ bool LinkKeeper::loopReadFirmwareVersion(void* dataBuffer)
 
 bool LinkKeeper::commandReadEmulatorMemory(uint32_t address, uint32_t length, void* dataBuffer)
 {
-    JlinkDevice* dev = theKeeper->getCurrDevice();
-    if (dev) {
+    if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
         return jlinkCommandReadEmulatorMemory(dev, address, length, dataBuffer);
     }
     return false;
@@ -687,8 +700,7 @@ bool LinkKeeper::commandReadEmulatorMemory(uint32_t address, uint32_t length, vo
 
 bool LinkKeeper::commandSetEmulateOption(uint32_t option, uint32_t val, uint32_t* status)
 {
-    JlinkDevice* dev = theKeeper->getCurrDevice();
-    if (dev) {
+    if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
         return jlinkCommandSetEmulateOption(dev, option, val, status);
     }
     return false;
@@ -696,8 +708,7 @@ bool LinkKeeper::commandSetEmulateOption(uint32_t option, uint32_t val, uint32_t
 
 bool LinkKeeper::commandSendUpdateFirmware(uint8_t* reply)
 {
-    JlinkDevice* dev = theKeeper->getCurrDevice();
-    if (dev) {
+    if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
         return jlinkCommandSendUpdateFirmware(dev, reply);
     }
     return false;
@@ -705,8 +716,7 @@ bool LinkKeeper::commandSendUpdateFirmware(uint8_t* reply)
 
 bool LinkKeeper::commandSendSelectInterface(uint8_t newif, uint32_t* oldif)
 {
-    JlinkDevice* dev = theKeeper->getCurrDevice();
-    if (dev) {
+    if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
         return jlinkCommandSendSelectInterface(dev, newif, oldif);
     }
     return false;
@@ -714,36 +724,49 @@ bool LinkKeeper::commandSendSelectInterface(uint8_t newif, uint32_t* oldif)
 
 bool LinkKeeper::dumpFullFirmware(uint32_t addr, uint32_t size, void* buf)
 {
-    JlinkDevice* dev = theKeeper->getCurrDevice();
-    if (dev) {
+    if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
         return jlinkDumpFullFirmware(dev, addr, size, buf);
     }
     return false;
 }
 
-bool LinkKeeper::commandReadUID(uint32_t* size, void* dataBuffer)
+bool LinkKeeper::commandReadUID(uint32_t* size, void* uid)
 {
-    JlinkDevice* dev = theKeeper->getCurrDevice();
-    if (dev) {
-        return jlinkCommandReadUID(dev, size, dataBuffer);
+    if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
+        return jlinkCommandReadUID(dev, size, uid);
     }
     return false;
 }
 
-bool LinkKeeper::commandReadOTSX(void* dataBuffer)
+bool LinkKeeper::commandReadOTSX(void* otsx)
 {
-    JlinkDevice* dev = theKeeper->getCurrDevice();
-    if (dev) {
-        return jlinkCommandReadOTSX(dev, dataBuffer);
+    if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
+        return jlinkCommandReadOTSX(dev, otsx);
     }
     return false;
 }
 
-bool LinkKeeper::commandReadOTS(void* dataBuffer)
+bool LinkKeeper::commandReadOTS(void* ots)
 {
-    JlinkDevice* dev = theKeeper->getCurrDevice();
-    if (dev) {
-        return jlinkCommandReadOTS(dev, dataBuffer);
+    if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
+        return jlinkCommandReadOTS(dev, ots);
+    }
+    return false;
+}
+
+bool LinkKeeper::commandReadEmuCapsEx(void* capbits)
+{
+    if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
+        return jlinkCommandReadEmuCapsEx(dev, capbits);
+    }
+    return false;
+
+}
+
+bool LinkKeeper::commandGetHWVersion(uint32_t* version)
+{
+    if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
+        return jlinkCommandGetHWVersion(dev, version);
     }
     return false;
 }
@@ -837,7 +860,7 @@ bool lookupTopSeggerDevID(DEVINST* devinst, uint16_t vid, char* devid, char* hub
                                     USB_NODE_CONNECTION_DRIVERKEY_NAME* pnodename = (USB_NODE_CONNECTION_DRIVERKEY_NAME*)malloc(infosize);
                                     pnodename->ConnectionIndex = i + 1;
                                     if (DeviceIoControl(hubhandle, IOCTL_USB_GET_NODE_CONNECTION_DRIVERKEY_NAME, pnodename, infosize, pnodename, infosize, &readed, NULL)) {
-                                        if (wcsicmp(keyname, pnodename->DriverKeyName) == 0) {
+                                        if (_wcsicmp(keyname, pnodename->DriverKeyName) == 0) {
                                             *port = i + 1;
                                             free(pnodename);
                                             break;
@@ -875,7 +898,7 @@ bool jlinkSendCommand(JlinkDevice* dev, void const* commandBuffer, uint32_t comm
         } else {
             ULONG readed = resultHeaderLength;
             while(g_recvpos < resultHeaderLength) {
-                if (WinUsb_ReadPipe(dev->interfaceHandle, dev->readPipe, (PUCHAR)&g_recvbuf[g_recvpos], 0x400, &readed, NULL)) {
+                if (WinUsb_ReadPipe(dev->interfaceHandle, dev->readPipe, (PUCHAR)&g_recvbuf[g_recvpos], sizeof(g_recvbuf) - g_recvpos, &readed, NULL)) {
                     g_recvpos += readed;
                 }
             }
@@ -984,7 +1007,7 @@ bool jlinkDumpFullFirmware(JlinkDevice* dev, uint32_t addr, uint32_t size, void*
 {
     // is reset handler zero?
     bool usexor = false;
-    uint32_t handler; // 2017 03 10 以后的固件读出为0或者xor后结果
+    uint32_t handler; // 2017 03 10 以后的固件读出为0或者dumper设置xor后结果
     if (jlinkCommandReadEmulatorMemory(dev, addr + 4, 4, &handler) && (((handler >> 24) != (addr >> 24)) || handler == 0)) {
         usexor = true;
         uint32_t status = -1;
@@ -994,10 +1017,10 @@ bool jlinkDumpFullFirmware(JlinkDevice* dev, uint32_t addr, uint32_t size, void*
             }
         }
     }
-
-    for (uint32_t pos = 0; pos < size; pos += 0x200, addr += 0x200) {
+    // 0x200 crash in 2023
+    for (uint32_t pos = 0; pos < size; pos += 0x100, addr += 0x100) {
         for (int i = 0; i < 20; i++) {
-            size_t lesssize = min(0x200, size);
+            size_t lesssize = min(0x100, size);
             if (jlinkCommandReadEmulatorMemory(dev, addr, lesssize, (char*)buf + pos)) {
                 if (usexor) {
                     uint32_t xorkey = 0x55;
@@ -1044,25 +1067,39 @@ bool jlinkCommandReadUID(JlinkDevice* dev, uint32_t* size, void* dataBuffer)
     return jlinkContinueReadResult(dev, dataBuffer, leftLength);
 }
 
-bool jlinkCommandReadOTSX(JlinkDevice* dev, void* dataBuffer)
+bool jlinkCommandReadOTSX(JlinkDevice* dev, void* otsx)
 {
     uint8_t commandBuffer[14] = {
         0x16,
         0x02
     };
-    *(uint32_t*)&commandBuffer[2] = 0;
+    *(uint32_t*)&commandBuffer[2] = 0; // fixed replylength 0x200
     memcpy(&commandBuffer[6], "IDSEGGER", 8);
 
     uint32_t leftLength = 0;
     if (!jlinkSendCommand(dev, commandBuffer, sizeof(commandBuffer), &leftLength, sizeof(leftLength)))
         return false;
 
-    return jlinkContinueReadResult(dev, dataBuffer, leftLength);
+    return jlinkContinueReadResult(dev, otsx, leftLength);
 }
 
-bool jlinkCommandReadOTS(JlinkDevice* dev, void* dataBuffer)
+bool jlinkCommandReadOTS(JlinkDevice* dev, void* ots)
 {
     uint8_t command = 0xE6;
 
-    return jlinkSendCommand(dev, &command, sizeof(command), dataBuffer, 0x100);
+    return jlinkSendCommand(dev, &command, sizeof(command), ots, 0x100);
+}
+
+bool jlinkCommandReadEmuCapsEx(JlinkDevice* dev, void* capbits)
+{
+    uint8_t command = 0xED;
+
+    return jlinkSendCommand(dev, &command, sizeof(command), capbits, 0x20);
+}
+
+bool jlinkCommandGetHWVersion(JlinkDevice* dev, uint32_t* version)
+{
+    uint8_t command = 0xF0;
+
+    return jlinkSendCommand(dev, &command, sizeof(command), version, sizeof(*version));
 }

@@ -55,6 +55,8 @@ struct JlinkDevice : JlinkDeviceInfo {
             UCHAR writePipe; // 81
         };
     };
+    DWORD readSize;
+    DWORD writeSize;
     void open();
     void close();
 };
@@ -88,7 +90,7 @@ public:
     static bool selectDevice(const hublocation& location);
     static void prepareReconnect();
     static bool waitReconnect(uint32_t timeout, uint32_t step);
-    static bool sendCommand(void const* commandBuffer, uint32_t commandLength, void* resultBuffer, uint32_t resultHeaderLength);
+    static bool sendCommand(void const* commandBuffer, uint32_t commandLength, void* resultBuffer, uint32_t resultBufferLength);
     static bool continueReadResult(void* resultBuffer, uint32_t resultLength);
     static bool commandReadFirmwareVersion(void* dataBuffer);
     static bool loopReadFirmwareVersion(void* dataBuffer);
@@ -97,9 +99,11 @@ public:
     static bool commandSendUpdateFirmware(uint8_t* reply);
     static bool commandSendSelectInterface(uint8_t newif, uint32_t* oldif);
     static bool dumpFullFirmware(uint32_t addr, uint32_t size, void* buf);
-    static bool commandReadUID(uint32_t* size, void* dataBuffer);
-    static bool commandReadOTSX(void* dataBuffer);
-    static bool commandReadOTS(void* dataBuffer);
+    static bool commandReadUID(uint32_t* size, void* uid);
+    static bool commandReadOTSX(void* otsx);
+    static bool commandReadOTS(void* ots);
+    static bool commandReadEmuCapsEx(void* capbits);
+    static bool commandGetHWVersion(uint32_t* version);
 };
 
 extern LinkKeeper* theKeeper;
@@ -132,7 +136,9 @@ bool jlinkCommandSendUpdateFirmware(JlinkDevice* dev, uint8_t* reply);
 bool jlinkCommandSendSelectInterface(JlinkDevice* dev, uint8_t newif, uint32_t* oldif);
 bool jlinkDumpFullFirmware(JlinkDevice* dev, uint32_t addr, uint32_t size, void* buf);
 bool jlinkCommandReadUID(JlinkDevice* dev, uint32_t* size, void* dataBuffer);
-bool jlinkCommandReadOTSX(JlinkDevice* dev, void* dataBuffer); // cmd16 otsx, size 0x200
-bool jlinkCommandReadOTS(JlinkDevice* dev, void* dataBuffer); // cmde6 size 0x100
+bool jlinkCommandReadOTSX(JlinkDevice* dev, void* otsx); // cmd16 otsx, size 0x200
+bool jlinkCommandReadOTS(JlinkDevice* dev, void* ots); // cmde6 size 0x100
+bool jlinkCommandReadEmuCapsEx(JlinkDevice* dev, void* capbits); // 53 of 256bits used
+bool jlinkCommandGetHWVersion(JlinkDevice* dev, uint32_t* version);
 
 #endif

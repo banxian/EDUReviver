@@ -85,17 +85,24 @@ bool loadFirmwareConfigs(const wchar_t* cfgpath)
             }
             if (strstr(line, "//") == 0) {
                 char version[0x71];
-                char truefalse[0x71];
-                char truefalse2[0x71];
+                char issesstr[0x71];
+                char regsstr[0x71];
                 patcher_config item = {0,};
-                //"J-Link V10 compiled Feb  2 2018 18:12:40", 0x100840A0, 0x1A010718, 0x1A010EDA, false
-                int cnt = sscanf(line, "\"%[^\"]\", 0x%X, 0x%X, 0x%X, %[^,], %hhd, 0x%X, 0x%X, 0x%X, %[^,]", version, &item.sp, &item.lr, &item.usbrx, truefalse, &item.cmdReg, &item.R4, &item.R5, &item.R6, truefalse2);
+                //"J-Link V10 compiled Feb  2 2018 18:12:40", 0x100840A8, 0x1A010718, 0x1A010EDA, false
+                //"J-Link V11 compiled Dec 14 2022 09:09:01", 0x10081D18, 0x1A035B9A, 0x1A045899, true, 0, 0x0, 0x10080F80, 0x145
+                int cnt = sscanf(line, "\"%[^\"]\", 0x%X, 0x%X, 0x%X, %[^,], %hhd, %[^\n]", version, &item.sptop, &item.lr, &item.usbrx, issesstr, &item.endgap, regsstr);
                 if (cnt >= 5) {
-                    truefalse[0x70] = 0;
-                    truefalse2[0x70] = 0;
+                    issesstr[0x70] = 0;
+                    regsstr[0x70] = 0;
                     version[0x70] = 0;
-                    item.isSES = _stricmp(truefalse, "true") == 0;
-                    item.nopad = _stricmp(truefalse2, "true") == 0;
+                    item.isSES = _stricmp(issesstr, "true") == 0;
+                    char* reg = strtok(regsstr, " ,");
+                    int i = 0;
+                    while (reg) {
+                        item.regs[i++] = strtol(reg, 0, 16);
+                        reg = strtok(NULL, " ,");
+                    }
+                    item.regCnt = i;
                     g_patchercfgs.insert(std::make_pair(std::string(version), item));
                 } else {
                     printf("Bad line in config file: %s\n", line);
@@ -128,9 +135,12 @@ bool add_user_config(const char* fwversion, const patcher_config* config)
         char line[128];
         int linelen;
         if (config->isSES) {
-            linelen = sprintf_s(line, _countof(line), "\"%s\", 0x%08X, 0x%08X, 0x%08X, true, %d, 0x%X, 0x%X, 0x%X, %s", version.c_str(), config->sp, config->lr, config->usbrx, config->cmdReg, config->R4, config->R5, config->R6, config->nopad?"true":"false");
+            linelen = sprintf_s(line, _countof(line), "\"%s\", 0x%08X, 0x%08X, 0x%08X, true, %d", version.c_str(), config->sptop, config->lr, config->usbrx, config->endgap);
+            for (int i = 0; i < config->regCnt; i++) {
+                linelen += sprintf_s(&line[linelen], _countof(line)-linelen, ", 0x%X", config->regs[i]);
+            }
         } else {
-            linelen = sprintf_s(line, _countof(line), "\"%s\", 0x%08X, 0x%08X, 0x%08X, false", version.c_str(), config->sp, config->lr, config->usbrx);
+            linelen = sprintf_s(line, _countof(line), "\"%s\", 0x%08X, 0x%08X, 0x%08X, false", version.c_str(), config->sptop, config->lr, config->usbrx);
         }
         _write(fd, line, linelen);
         _close(fd);
@@ -256,6 +266,8 @@ uint32_t extract_ldr_pool(const cs_insn* insn)
 typedef std::vector<int> IntVec;
 
 void calc_stack(cs_insn *insn, size_t count, IntVec& vec);
+void calc_call(cs_insn *insn, size_t count, IntVec& calls);
+size_t guess_func_size(csh handle, const uint8_t *code, size_t maxsize, uint32_t address);
 
 #define FREE_AND_EXIT(ptr) cs_free(insn, count); cs_close(&handle); return ptr;
 
@@ -319,9 +331,9 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         }
         cs_free(insn, count);
         // find __SEGGER_init_done
-        int retry = 0;
+        int ahead = 0;
         uint32_t mainaddr = 0;
-        while (retry++ < 20 && mainaddr == 0) {
+        while (ahead++ < 20 && mainaddr == 0) {
             uint32_t initfunc = reader.read_uint32_addr(inittable);
             inittable += 4;
             // SEGGER_crtinit_v7em_little.o
@@ -351,7 +363,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         uint32_t taskstack = 0, stacksize = 0;
         uint32_t maintaskaddr = 0, taskstackinit = 0;
         for (size_t j = 0; j < count; j++) {
-            //printf("%"PRIx64"\t%s\t\t%s\n", insn[j].address, insn[j].mnemonic, insn[j].op_str);
+            //printf("%08x\t%s\t\t%s\n", (uint32_t)insn[j].address, insn[j].mnemonic, insn[j].op_str);
             cs_arm* arm = &insn[j].detail->arm;
             if ((insn[j].id == ARM_INS_MOV || insn[j].id == ARM_INS_MOVW) && arm->operands[0].type == ARM_OP_REG && arm->operands[1].type == ARM_OP_IMM) {
                 if (arm->operands[0].reg == ARM_REG_R0) {
@@ -386,7 +398,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
             }
         }
         cs_free(insn, count);
-        //dispatchcmd是taskmain的一部分
+        //dispatchcmd成为了taskmain的一部分
         //1A0197AC 000 98 B0                       SUB     SP, SP, #0x60
         //1A01B25A 060 80 47                       BLX     R0
         count = cs_disasm(handle, reader.buf_at_addr(maintaskaddr & ~1), SESTASKMAINSIZE, (maintaskaddr & ~1), 0, &insn);
@@ -394,14 +406,14 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         calc_stack(insn, count, spdvec);
         uint32_t cmdtable = 0;
         int cmdcnt = 0;
-        uint32_t r456val[3];
-        bool r456dirty[3] = {true, true, true};
+        uint32_t r456val[9];
+        bool r456dirty[9] = {true, true, true, true, true, true, true, true, true};
         int spd1, spd2;
         uint32_t dispatchlr;
         uint32_t usbrxbuf = 0;
         int rawCmdRegIdx = -1;
         for (size_t j = 0; j < count; j++) {
-            //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
+            //printf("%08x %03x \t%s\t\t%s\n", (uint32_t)insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
             cs_arm* arm = &insn[j].detail->arm;
             // BLX R0
             if (j > 5 && insn[j].id == ARM_INS_BLX && arm->operands[0].type == ARM_OP_REG) {
@@ -411,48 +423,50 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
                 // base cmdtable
                 // shift 2
                 if (insn[j-1].id == ARM_INS_LDR && prevarm->operands[0].reg == arm->operands[0].reg && 
-                    prevarm->operands[1].type == ARM_OP_MEM && prevarm->operands[1].shift.type == ARM_SFT_LSL && prevarm->operands[1].shift.value == 2) {
-                        dispatchlr = (uint32_t)insn[j+1].address;
-                        spd1 = spdvec[j];
-                        int cmdreg = prevarm->operands[1].mem.index;
-                        int tablereg = prevarm->operands[1].mem.base;
-                        j--;
-                        // 寻找这对组合
-                        //ADDS    R6, #0x65
-                        //UXTB    R0, R6
-                        while (j--) {
-                            cs_arm* arm = &insn[j].detail->arm;
-                            cs_arm* prevarm = &insn[j-1].detail->arm;
-                            if (insn[j].id == ARM_INS_UXTB && arm->operands[0].reg == cmdreg &&
-                                is_reg_add_imm(&insn[j-1], arm->operands[1].reg)) {
-                                    // R6=rawcmd
-                                    cmdcnt = prevarm->operands[1].imm;
-                                    printf("rawcmd reg: %s, val: %08X\n", cs_reg_name(handle, prevarm->operands[0].reg), cmdcnt + 0xE0);
-                                    rawCmdRegIdx = prevarm->operands[0].reg - ARM_REG_R0;
-                                    break;
-                            }
-                        }
-                        while (j++) {
-                            //MOV     R1, #g_usbcmds
-                            cs_arm* arm = &insn[j].detail->arm;
-                            if ((insn[j].id == ARM_INS_MOV || insn[j].id == ARM_INS_MOVW) && arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg == tablereg && arm->operands[1].type == ARM_OP_IMM) {
-                                cmdtable = arm->operands[1].imm;
-                            }
-                            if (insn[j].id == ARM_INS_MOVT && arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg == tablereg && arm->operands[1].type == ARM_OP_IMM) {
-                                *((uint16_t*)&cmdtable + 1) = arm->operands[1].imm;
-                                break;
-                            }
-                        }
-                        if (cmdcnt && cmdtable) {
-                            printf("g_usbcmds: %08X, count: %d\n", cmdtable, cmdcnt);
+                    prevarm->operands[1].type == ARM_OP_MEM && prevarm->operands[1].shift.type == ARM_SFT_LSL && prevarm->operands[1].shift.value == 2)
+                {
+                    dispatchlr = (uint32_t)insn[j+1].address;
+                    spd1 = spdvec[j];
+                    int cmdreg = prevarm->operands[1].mem.index;
+                    int tablereg = prevarm->operands[1].mem.base;
+                    j--;
+                    // 寻找这对组合
+                    //ADDS    R6, #0x65
+                    //UXTB    R0, R6
+                    while (j--) {
+                        cs_arm* arm = &insn[j].detail->arm;
+                        cs_arm* prevarm = &insn[j-1].detail->arm;
+                        if (insn[j].id == ARM_INS_UXTB && arm->operands[0].reg == cmdreg &&
+                            is_reg_add_imm(&insn[j-1], arm->operands[1].reg))
+                        {
+                            // R6=rawcmd
+                            cmdcnt = prevarm->operands[1].imm;
+                            printf("rawcmd reg: %s, val: %08X\n", cs_reg_name(handle, prevarm->operands[0].reg), cmdcnt + 0xE0);
+                            rawCmdRegIdx = prevarm->operands[0].reg - ARM_REG_R0;
                             break;
                         }
+                    }
+                    while (j++) {
+                        //MOV     R1, #g_usbcmds
+                        cs_arm* arm = &insn[j].detail->arm;
+                        if ((insn[j].id == ARM_INS_MOV || insn[j].id == ARM_INS_MOVW) && arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg == tablereg && arm->operands[1].type == ARM_OP_IMM) {
+                            cmdtable = arm->operands[1].imm;
+                        }
+                        if (insn[j].id == ARM_INS_MOVT && arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg == tablereg && arm->operands[1].type == ARM_OP_IMM) {
+                            *((uint16_t*)&cmdtable + 1) = arm->operands[1].imm;
+                            break;
+                        }
+                    }
+                    if (cmdcnt && cmdtable) {
+                        printf("g_usbcmds: %08X, count: %d\n", cmdtable, cmdcnt);
+                        break;
+                    }
                 }
                 // lookup usbdfuncs table later
             }
             // 跟踪出现的目的R4~R6赋值
             const char* unknown = 0;
-            if (arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg >= ARM_REG_R4 && arm->operands[0].reg <= ARM_REG_R6) {
+            if (arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg >= ARM_REG_R4 && arm->operands[0].reg <= ARM_REG_R12) {
                 // 持续跟踪R4/R5/R6的MOVW/MOVT对值
                 uint32_t* lpreg = &r456val[arm->operands[0].reg - ARM_REG_R4];
                 bool* lpdirty = &r456dirty[arm->operands[0].reg - ARM_REG_R4];
@@ -485,7 +499,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
             }
 #ifdef _DEBUG
             if (unknown) {
-                //printf("Unsupported %s %"PRIx64" %03x \t%s\t\t%s\n", unknown, insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
+                //printf("Unsupported %s %08x %03x \t%s\t\t%s\n", unknown, (uint32_t)insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
             }
 #endif
         }
@@ -493,161 +507,171 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
 #define r4val r456val[0]
 #define r5val r456val[1]
 #define r6val r456val[2]
-        printf("R4: %08X R5:%08X R6:%08X\n", r4val, r5val, r6val);
+        printf("R4: %08X R5: %08X R6: %08X\n", r4val, r5val, r6val);
         if (cmdcnt == 0) {
             errprintf("Analyst failed on command table!\n");
             cs_close(&handle);
             return NULL;
         }
         uint32_t cmde0func = reader.read_uint32_addr(cmdtable + (cmdcnt - 1 - (0xFF - 0xE0)) * 4);
-        printf("cmd_e0_fine_write_read: %08X\n", cmde0func);
+        size_t e0size = guess_func_size(handle, reader.buf_at_addr(cmde0func & ~1), 0x70, (cmde0func & ~1));
+        printf("cmd_e0_fine_write_read: %08X, %X bytes\n", cmde0func, e0size);
         // 寻找usbrxbuf崩溃点, 5C
-        count = cs_disasm(handle, reader.buf_at_addr(cmde0func & ~1), 0x70, (cmde0func & ~1), 0, &insn);
+        count = cs_disasm(handle, reader.buf_at_addr(cmde0func & ~1), e0size, (cmde0func & ~1), 0, &insn);
         calc_stack(insn, count, spdvec);
-        int callcount = 0;
-        size_t firstBL = -1, firstBLX = -1, secondBLX = -1;
-        int funcsreg, blxrxreg;
-        uint32_t currstack;
-        bool smallstack = false;
-        for (size_t j = 0; j < count; j++) {
-            //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
-            cs_arm* arm = &insn[j].detail->arm;
-            // BLX R2
-            if (insn[j].id == ARM_INS_BL && arm->operands[0].type == ARM_OP_IMM) {
-                firstBL = j;
+        // 第一次call是settimer(-1), 第二次是usbrx(arg,12), 第三次是usbrx(writebuf,writelen)
+        // 第二可能不内联, 第三可能跟if(writelen)条件一起外联为usbrxif
+        // 考虑可能分开内外联, 不能限制两次rx寄存器/地址
+        IntVec calls;
+        calc_call(insn, count, calls);
+        if (calls.size() < 5) {
+            errprintf("unexpected cmd_e0_fine_write_read calls count: %u.\n", calls.size());
+            FREE_AND_EXIT(NULL);
+        }
+        size_t firstcall = calls[0], firstrx = calls[1], secondrx = calls[2];
+        uint32_t argspdelta, savedregs, endgap;
+        bool rxaddrknown = (insn[firstrx].id == ARM_INS_BL || insn[secondrx].id == ARM_INS_BL);
+        uint32_t argstack;
+        for (size_t i = 0; i < count; i++) {
+            cs_arm* arm = &insn[i].detail->arm;
+            if (i < firstcall) {
+                if (insn[i].id == ARM_INS_PUSH && arm->operands[arm->op_count-1].reg == ARM_REG_LR) {
+                    savedregs = arm->op_count - 1;
+                }
             }
-            if (firstBL != -1 && insn[j].id == ARM_INS_MOVT) {
-                funcsreg = arm->operands[0].reg;
+            if (i < firstrx) {
+                if (insn[i].id == ARM_INS_MOV && arm->op_count == 2 && arm->operands[1].type == ARM_OP_REG && arm->operands[1].reg == ARM_REG_SP) {
+                    argspdelta = 0;
+                }
+                if (insn[i].id == ARM_INS_ADD && arm->op_count == 3 && arm->operands[1].type == ARM_OP_REG && arm->operands[1].reg == ARM_REG_SP) {
+                    argspdelta = arm->operands[2].imm;
+                }
             }
-            if (insn[j].id == ARM_INS_BLX && arm->operands[0].type == ARM_OP_REG) {
-                if (callcount) {
-                    spd2 = spdvec[j];
-                    secondBLX = j;
-                    blxrxreg = arm->operands[0].reg;
-                    currstack = taskstackinit + spd1 + spd2;
-                    printf("sp: %08X dispatch LR:%08X\n", currstack, dispatchlr);
+            if (i == secondrx) {
+                spd2 = spdvec[i]; // -30~-40
+                argstack = taskstackinit + spd1 + spd2 + argspdelta;
+                endgap = (-spd2) - (savedregs + 1)*4 - 0x30 - argspdelta;
+                printf("argstack: %08X original LR: %08X, endgap: %d\n", argstack, dispatchlr, endgap);
+            }
+        }
+        if (rxaddrknown) {
+            usbrxbuf = insn[(insn[firstrx].id == ARM_INS_BL)?firstrx:secondrx].detail->arm.operands[0].imm;
+        } else {
+            int funcsreg, blxrxreg = insn[firstrx].detail->arm.operands[0].reg;
+            // first movw/movt before firstrx call
+            for (size_t i = 0; i < firstrx; i++) {
+                if (insn[i].id == ARM_INS_MOVT) {
+                    funcsreg = insn[i].detail->arm.operands[0].reg;
                     break;
-                } else {
-                    firstBLX = j;
-                    callcount++;
                 }
             }
-            // V12固件优化最小栈 0C+10+14
-            if (insn[j].id == ARM_INS_SUB && arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg == ARM_REG_SP && arm->operands[1].type == ARM_OP_IMM) {
-                smallstack = (arm->operands[1].imm <= 0x30);
-            }
-        }
-        // 寻找指针源
-        uint32_t pipefuncs;
-        int midreg = ARM_REG_INVALID, basereg = ARM_REG_INVALID;
-        int rxdisp;
-        for (size_t j = firstBL+1; j < firstBLX; j++) {
-            cs_arm* arm = &insn[j].detail->arm;
-            if (midreg == ARM_REG_INVALID) {
-                // MOV32   R6, #g_usbd_funcs
-                if (arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg == funcsreg && arm->operands[1].type == ARM_OP_IMM) {
-                    if ((insn[j].id == ARM_INS_MOV || insn[j].id == ARM_INS_MOVW)) {
-                        pipefuncs = arm->operands[1].imm;
-                    } else if (insn[j].id == ARM_INS_MOVT) {
-                        *((uint16_t*)&pipefuncs + 1) = arm->operands[1].imm;
-                        printf("g_pipe_funcs: %08X\n", pipefuncs);
-                        midreg = arm->operands[0].reg;
+            // 寻找指针源, 以便后面回溯指针赋值
+            uint32_t pipefuncs;
+            int midreg = ARM_REG_INVALID, basereg = ARM_REG_INVALID;
+            int rxdisp;
+            for (size_t j = firstcall+1; j < firstrx; j++) {
+                cs_arm* arm = &insn[j].detail->arm;
+                if (midreg == ARM_REG_INVALID) {
+                    // MOV32   R6, #g_usbd_funcs
+                    if (arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg == funcsreg && arm->operands[1].type == ARM_OP_IMM) {
+                        if ((insn[j].id == ARM_INS_MOV || insn[j].id == ARM_INS_MOVW)) {
+                            pipefuncs = arm->operands[1].imm;
+                        } else if (insn[j].id == ARM_INS_MOVT) {
+                            *((uint16_t*)&pipefuncs + 1) = arm->operands[1].imm;
+                            printf("g_pipe_funcs: %08X\n", pipefuncs);
+                            midreg = arm->operands[0].reg;
+                        }
                     }
-                }
-            } else if (basereg == ARM_REG_INVALID) {
-                if (insn[j].id == ARM_INS_LDR &&
-                    arm->operands[0].type == ARM_OP_REG && 
-                    arm->operands[1].type == ARM_OP_MEM && arm->operands[1].mem.base == midreg && arm->operands[1].mem.disp == 0)
-                {
-                    // LDR     R0, [R6]
-                    basereg = arm->operands[0].reg;
-                }
-            } else if (insn[j].id == ARM_INS_LDR &&
-                arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg == blxrxreg && 
-                arm->operands[1].type == ARM_OP_MEM && arm->operands[1].mem.base == basereg)
-            {
-                // LDR     R2, [R0,#8]
-                rxdisp = arm->operands[1].mem.disp;
-                break;
-            }
-        }
-        // 寻找cmd_e0_fine_write_read最后的发送
-        uint32_t usbtxbuf;
-        for (size_t j = secondBLX+1; j < count; j++) {
-            //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
-            if (insn[j].id == ARM_INS_BL && insn[j].detail->arm.operands[0].type == ARM_OP_IMM) {
-                usbtxbuf = insn[j].detail->arm.operands[0].imm;
-            }
-            if (spdvec[j] == 0) {
-                printf("usbtxbuf: %08X\n", usbtxbuf);
-                break;
-            }
-        }
-        cs_free(insn, count);
-        // 在apptaskmain里寻找对usbdfuncs的赋值, 假设第一个是对的
-        //ROM:1A019116 0B0  MOV     R0, #g_usbd_funcs
-        //ROM:1A01911E 0B0  MOV     R1, #usbdfuncs
-        //ROM:1A019126 0B0  STR     R1, [R0]
-        count = cs_disasm(handle, reader.buf_at_addr(maintaskaddr & ~1), SESTASKMAINSIZE, (maintaskaddr & ~1), 0, &insn);
-        uint32_t r0val, r1val;
-        for (size_t j = 0; j < count - 1; j++) {
-            //printf("%"PRIx64"\t%s\t\t%s\n", insn[j].address, insn[j].mnemonic, insn[j].op_str);
-            cs_arm* arm = &insn[j].detail->arm;
-            if (arm->operands[1].type == ARM_OP_IMM && arm->operands[0].type == ARM_OP_REG && (arm->operands[0].reg == ARM_REG_R0 || arm->operands[0].reg == ARM_REG_R1)) {
-                if ((insn[j].id == ARM_INS_MOV || insn[j].id == ARM_INS_MOVW)) {
-                    (arm->operands[0].reg == ARM_REG_R0?r0val:r1val) = arm->operands[1].imm;
-                } else if (insn[j].id == ARM_INS_MOVT) {
-                    *((uint16_t*)(arm->operands[0].reg == ARM_REG_R0?&r0val:&r1val) + 1) = arm->operands[1].imm;
-                } 
-            }
-            if (insn[j].id == ARM_INS_STR &&
-                arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg == ARM_REG_R1 && 
-                arm->operands[1].type == ARM_OP_MEM && arm->operands[1].mem.disp == 0 && arm->operands[1].mem.base == ARM_REG_R0 && r0val == pipefuncs)
-            {
-                uint32_t rxbeginaddr = reader.read_uint32_addr(r1val + rxdisp);
-                cs_insn* ins2;
-                size_t cnt2 = cs_disasm(handle, reader.buf_at_addr(rxbeginaddr & ~1), 0x100, (rxbeginaddr & ~1), 0, &ins2);
-                bool hitted = false;
-                for (size_t j = 0; j < cnt2 - 1; j++) {
-#ifdef _DEBUG
-                    printf("%"PRIx64"\t%s\t\t%s\n", ins2[j].address, ins2[j].mnemonic, ins2[j].op_str);
-#endif
-                    cs_arm* arm = &ins2[j].detail->arm;
-                    //ROM:1A0458B0  MOVW    R3, #3000
-                    //ROM:1A0458B4  BL      sub_1A0410A0
-                    if (ins2[j].id == ARM_INS_MOVW && arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg == ARM_REG_R3 &&
-                        arm->operands[1].type == ARM_OP_IMM && arm->operands[1].imm == 3000 &&
-                        ins2[j+1].id == ARM_INS_BL)
+                } else if (basereg == ARM_REG_INVALID) {
+                    if (insn[j].id == ARM_INS_LDR &&
+                        arm->operands[0].type == ARM_OP_REG && 
+                        arm->operands[1].type == ARM_OP_MEM && arm->operands[1].mem.base == midreg && arm->operands[1].mem.disp == 0)
                     {
-                        usbrxbuf = reader.read_uint32_addr(r1val + rxdisp); // TODO: use dispatch from fine_read_write
-                        printf("usbrxbuf: %08X\n", usbrxbuf);
-                        hitted = true;
+                        // LDR     R0, [R6]
+                        basereg = arm->operands[0].reg;
+                    }
+                } else if (insn[j].id == ARM_INS_LDR &&
+                    arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg == blxrxreg && 
+                    arm->operands[1].type == ARM_OP_MEM && arm->operands[1].mem.base == basereg)
+                {
+                    // LDR     R2, [R0,#8]
+                    rxdisp = arm->operands[1].mem.disp;
+                    break;
+                }
+            }
+            // 求得cmd_e0_fine_write_read最后的发送
+            uint32_t usbtxbuf = insn[calls.back()].detail->arm.operands[0].imm;
+            printf("usbtxbuf: %08X\n", usbtxbuf);
+            cs_free(insn, count);
+            // 在apptaskmain里寻找对usbdfuncs的赋值, 假设第一个是对的
+            //ROM:1A019116 0B0  MOV     R0, #g_usbd_funcs
+            //ROM:1A01911E 0B0  MOV     R1, #usbdfuncs
+            //ROM:1A019126 0B0  STR     R1, [R0]
+            count = cs_disasm(handle, reader.buf_at_addr(maintaskaddr & ~1), SESTASKMAINSIZE, (maintaskaddr & ~1), 0, &insn);
+            uint32_t r0val, r1val;
+            for (size_t j = 0; j < count - 1; j++) {
+                //printf("%08x\t%s\t\t%s\n", (uint32_t)insn[j].address, insn[j].mnemonic, insn[j].op_str);
+                cs_arm* arm = &insn[j].detail->arm;
+                if (arm->operands[1].type == ARM_OP_IMM && arm->operands[0].type == ARM_OP_REG && (arm->operands[0].reg == ARM_REG_R0 || arm->operands[0].reg == ARM_REG_R1)) {
+                    if ((insn[j].id == ARM_INS_MOV || insn[j].id == ARM_INS_MOVW)) {
+                        (arm->operands[0].reg == ARM_REG_R0?r0val:r1val) = arm->operands[1].imm;
+                    } else if (insn[j].id == ARM_INS_MOVT) {
+                        *((uint16_t*)(arm->operands[0].reg == ARM_REG_R0?&r0val:&r1val) + 1) = arm->operands[1].imm;
+                    } 
+                }
+                if (insn[j].id == ARM_INS_STR &&
+                    arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg == ARM_REG_R1 && 
+                    arm->operands[1].type == ARM_OP_MEM && arm->operands[1].mem.disp == 0 && arm->operands[1].mem.base == ARM_REG_R0 && r0val == pipefuncs)
+                {
+                    uint32_t rxbeginaddr = reader.read_uint32_addr(r1val + rxdisp);
+                    cs_insn* ins2;
+                    size_t cnt2 = cs_disasm(handle, reader.buf_at_addr(rxbeginaddr & ~1), 0x100, (rxbeginaddr & ~1), 0, &ins2);
+                    bool hitted = false;
+                    for (size_t j = 0; j < cnt2 - 1; j++) {
+#ifdef _DEBUG
+                        printf("%08x\t%s\t\t%s\n", (uint32_t)ins2[j].address, ins2[j].mnemonic, ins2[j].op_str);
+#endif
+                        cs_arm* arm = &ins2[j].detail->arm;
+                        //ROM:1A0458B0  MOVW    R3, #3000
+                        //ROM:1A0458B4  BL      sub_1A0410A0
+                        if (ins2[j].id == ARM_INS_MOVW && arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg == ARM_REG_R3 &&
+                            arm->operands[1].type == ARM_OP_IMM && arm->operands[1].imm == 3000 &&
+                            ins2[j+1].id == ARM_INS_BL)
+                        {
+                            usbrxbuf = reader.read_uint32_addr(r1val + rxdisp); // TODO: use dispatch from fine_read_write
+                            printf("usbrxbuf: %08X\n", usbrxbuf);
+                            hitted = true;
+                            break;
+                        }
+                    }
+                    cs_free(ins2, cnt2);
+                    if (hitted) {
                         break;
                     }
-                }
-                cs_free(ins2, cnt2);
-                if (hitted) {
-                    break;
                 }
             }
         }
         cs_free(insn, count);
         // version, sp, lr, uxbrx, true, cmdReg, R4, R5, R6
-        if (rawCmdRegIdx >= 4 && rawCmdRegIdx <= 6) {
+        if (rawCmdRegIdx >= 4 && rawCmdRegIdx <= 12) {
             r456val[rawCmdRegIdx - 4] = cmdcnt + 0xE0;
             r456dirty[rawCmdRegIdx - 4] = false;
         }
-        for (int i = 0; i < 3; i++) {
+        bool fatal = false;
+        for (size_t i = 0; i < savedregs; i++) {
             if (r456dirty[i]) {
                 errprintf("R%d val is bad!\n", 4 + i);
+                if (i != rawCmdRegIdx - 4) {
+                    fatal = true;
+                }
             }
         }
-        if (r456dirty[0] || r456dirty[1] || r456dirty[2]) {
+        if (fatal) {
             cs_close(&handle);
             return NULL;
         }
-        //printf("\"%s\", 0x%08X, 0x%08X, 0x%08X, true, %d, 0x%X, 0x%X, 0x%X\n", reader.get_banner(), currstack, dispatchlr, usbrxbuf, rawCmdRegIdx, r4val, r5val, r6val);
-        patcher_config item = {currstack, dispatchlr, usbrxbuf, true, (char)rawCmdRegIdx, r4val, r5val, r6val, smallstack};
+        patcher_config item = {argstack, dispatchlr, usbrxbuf, true, (char)savedregs};
+        memcpy(item.regs, r456val, sizeof(uint32_t)*savedregs);
         add_user_config(reader.get_banner(), &item);
     }
     // IAR固件?
@@ -657,13 +681,13 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
             startaddr = reader.read_uint32_addr(startaddr);
             printf("__iar_program_start: %08X\n", startaddr);
         } else {
-            printf("Firmware not build by EWARM\n");
+            errprintf("Firmware not build by EWARM\n");
             FREE_AND_EXIT(NULL);
         }
         cs_free(insn, count);
         count = cs_disasm(handle, reader.buf_at_addr((startaddr & ~1) + 8), 4, (startaddr & ~1) + 8, 0, &insn);
         if (count <= 0 || insn[0].id != ARM_INS_BL) {
-            printf("Firmware not build by EWARM.\n");
+            errprintf("Firmware not build by EWARM.\n");
             FREE_AND_EXIT(NULL);
         }
         uint32_t __cmainaddr = insn[0].detail->arm.operands[0].imm;
@@ -692,7 +716,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         uint32_t maintaskaddr = -1, taskstackinit = -1;
         int step = 0;
         for (size_t j = 0; j < count; j++) {
-            //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
+            //printf("%08x %03x \t%s\t\t%s\n", (uint32_t)insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
             cs_arm* arm = &insn[j].detail->arm;
             // LDR     R3, =(app_maintask+1)
             if (step == 0 && insn[j].id == ARM_INS_LDR && 
@@ -707,7 +731,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
                 bool stackok = false, sizeok = false;
                 int stackreg = ARM_REG_INVALID, sizereg = ARM_REG_INVALID;
                 while(j--) {
-                    //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
+                    //printf("%08x %03x \t%s\t\t%s\n", (uint32_t)insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
                     cs_arm* arm = &insn[j].detail->arm;
                     // 先找[SP]和[SP+4]填充stackreg和sizereg
                     // STR     R1, [SP,#0x10+StackSize]
@@ -758,7 +782,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         uint32_t target = -1;
         int spd1, spd2, spd3;
         for (size_t j = 0; j < count; j++) {
-            //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
+            //printf("%08x %03x \t%s\t\t%s\n", (uint32_t)insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
             cs_arm* arm = &insn[j].detail->arm;
             // LDRB.W  R0, [SP,#8+cmd]
             if (step == 0 && insn[j].id == ARM_INS_LDRB && 
@@ -786,7 +810,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         uint32_t dispatchlr, cmdtable;
         int cmdcnt = 0;
         for (size_t j = 0; j < count; j++) {
-            //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
+            //printf("%08x %03x \t%s\t\t%s\n", (uint32_t)insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
             cs_arm* arm = &insn[j].detail->arm;
             // BLX     R0
             if (insn[j].id == ARM_INS_BLX && arm->operands[0].type == ARM_OP_REG) {
@@ -796,7 +820,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
                 int reg = ARM_REG_INVALID;
                 // 往回寻找ADD/LDR
                 while (j--) {
-                    //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
+                    //printf("%08x %03x \t%s\t\t%s\n", (uint32_t)insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
                     cs_arm* arm = &insn[j].detail->arm;
                     // V10/V9会有不同的寻址指令
                     // ADR.W   R0, g_usb_cmdtable
@@ -835,46 +859,41 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
             cs_close(&handle);
             return NULL;
         }
-        uint32_t cmde0func = reader.read_uint32_addr(cmdtable + (cmdcnt - 1 - (0xFF - 0xE0)) * 4);
+        uint32_t cmde0func = reader.read_uint32_addr(cmdtable + (cmdcnt - 1 - (0xFF - 0xE0)) * 4); // e0肯定第二段
         printf("cmd_e0_fine_write_read: %08X\n", cmde0func);
         // 寻找usbrxbuf崩溃点, 4c
-        count = cs_disasm(handle, reader.buf_at_addr(cmde0func & ~1), 0x60, (cmde0func & ~1), 0, &insn);
+        size_t e0size = guess_func_size(handle, reader.buf_at_addr(cmde0func & ~1), 0x60, (cmde0func & ~1));
+        count = cs_disasm(handle, reader.buf_at_addr(cmde0func & ~1), e0size, (cmde0func & ~1), 0, &insn);
+        IntVec calls;
+        calc_call(insn, count, calls);
+        if (calls.size() < 5) {
+            errprintf("unexpected cmd_e0_fine_write_read calls count: %u.\n", calls.size());
+            FREE_AND_EXIT(NULL);
+        }
         calc_stack(insn, count, spdvec);
-        uint32_t usbrxbuf = -1;
-        size_t prevj = -1;
-        uint32_t currstack;
-        for (size_t j = 0; j < count; j++) {
-            //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
-            cs_arm* arm = &insn[j].detail->arm;
-            // BL      app_usbrxbuf
-            if (insn[j].id == ARM_INS_BL && arm->operands[0].type == ARM_OP_IMM) {
-                if (arm->operands[0].imm == usbrxbuf) {
-                    spd3 = spdvec[j];
-                    currstack = taskstackinit + spd1 + spd2 + spd3;
-                    printf("sp: %08X dispatch LR:%08X usbrxbuf: %08X\n", currstack, dispatchlr, usbrxbuf);
-                    prevj = j;
-                    break;
-                } else {
-                    usbrxbuf = arm->operands[0].imm;
-                }
+        size_t firstrx = calls[1], secondrx = calls[2];
+        uint32_t usbrxbuf = insn[firstrx].detail->arm.operands[0].imm;
+        spd3 = spdvec[secondrx];
+        int argspdelta = -1;
+        for (size_t i = 0; i < firstrx; i++) {
+            //printf("%08x %03x \t%s\t\t%s\n", (uint32_t)insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
+            cs_arm* arm = &insn[i].detail->arm;
+            if (insn[i].id == ARM_INS_MOV && arm->op_count == 2 && arm->operands[1].type == ARM_OP_REG && arm->operands[1].reg == ARM_REG_SP) {
+                argspdelta = 0;
+            }
+            if (insn[i].id == ARM_INS_ADD && arm->op_count == 3 && arm->operands[1].type == ARM_OP_REG && arm->operands[1].reg == ARM_REG_SP) {
+                argspdelta = arm->operands[2].imm;
             }
         }
-        // 寻找cmd_e0_fine_write_read最后的发送
-        uint32_t usbtxbuf;
-        for (size_t j = prevj + 1; j < count; j++) {
-            //printf("%"PRIx64" %03x \t%s\t\t%s\n", insn[j].address, -spdvec[j], insn[j].mnemonic, insn[j].op_str);
-            if (insn[j].id == ARM_INS_BL && insn[j].detail->arm.operands[0].type == ARM_OP_IMM) {
-                usbtxbuf = insn[j].detail->arm.operands[0].imm;
-            }
-            if (spdvec[j] == 0) {
-                printf("usbtxbuf: %08X\n", usbtxbuf);
-                break;
-            }
-        }
+        uint32_t argstack = taskstackinit + spd1 + spd2 + spd3 + argspdelta;
+        printf("argstack: %08X original LR:%08X usbrxbuf: %08X\n", argstack, dispatchlr, usbrxbuf);
+        // 求得cmd_e0_fine_write_read最后的发送
+        uint32_t usbtxbuf = insn[calls.back()].detail->arm.operands[0].imm;
+        printf("usbtxbuf: %08X\n", usbtxbuf);
         cs_free(insn, count);
         // version, sp, lr, uxbrx, false
         //printf("\"%s\", 0x%08X, 0x%08X, 0x%08X, false\n", reader.get_banner(), currstack, dispatchlr, usbrxbuf);
-        patcher_config item = {currstack, dispatchlr, usbrxbuf, false};
+        patcher_config item = {argstack, dispatchlr, usbrxbuf, false};
         add_user_config(reader.get_banner(), &item);
     }
     cs_close(&handle);
@@ -886,27 +905,79 @@ void calc_stack(cs_insn *insn, size_t count, IntVec& vec)
 {
     int spd = 0;
     vec.resize(count);
-    for (size_t j = 0; j < count; j++) {
-        vec[j] = spd;
-        if (insn[j].id == ARM_INS_PUSH) {
-            spd -= insn[j].detail->arm.op_count * 4;
+    for (size_t i = 0; i < count; i++) {
+        vec[i] = spd;
+        if (insn[i].id == ARM_INS_PUSH) {
+            spd -= insn[i].detail->arm.op_count * 4;
         }
-        if (insn[j].id == ARM_INS_POP) {
-            spd += insn[j].detail->arm.op_count * 4;
+        if (insn[i].id == ARM_INS_POP) {
+            spd += insn[i].detail->arm.op_count * 4;
         }
         // ldr lr,[sp],#4
-        if (insn[j].id == ARM_INS_LDR && insn[j].detail->arm.op_count == 3 && 
-            insn[j].detail->arm.operands[1].type == ARM_OP_MEM && insn[j].detail->arm.operands[1].mem.base == ARM_REG_SP && 
-            insn[j].detail->arm.operands[2].type == ARM_OP_IMM) {
-                spd += insn[j].detail->arm.operands[2].imm;
+        if (insn[i].id == ARM_INS_LDR && insn[i].detail->arm.op_count == 3 && 
+            insn[i].detail->arm.operands[1].type == ARM_OP_MEM && insn[i].detail->arm.operands[1].mem.base == ARM_REG_SP && 
+            insn[i].detail->arm.operands[2].type == ARM_OP_IMM) {
+                spd += insn[i].detail->arm.operands[2].imm;
         }
-        if ((insn[j].id == ARM_INS_SUB || insn[j].id == ARM_INS_ADD) && insn[j].detail->arm.op_count == 2 && insn[j].detail->arm.operands[0].type == ARM_OP_REG && insn[j].detail->arm.operands[0].reg == ARM_REG_SP) {
-            if (insn[j].id == ARM_INS_SUB) {
-                spd -= insn[j].detail->arm.operands[1].imm;
+        if ((insn[i].id == ARM_INS_SUB || insn[i].id == ARM_INS_ADD) && insn[i].detail->arm.op_count == 2 && insn[i].detail->arm.operands[0].type == ARM_OP_REG && insn[i].detail->arm.operands[0].reg == ARM_REG_SP) {
+            if (insn[i].id == ARM_INS_SUB) {
+                spd -= insn[i].detail->arm.operands[1].imm;
             } else {
-                spd += insn[j].detail->arm.operands[1].imm;
+                spd += insn[i].detail->arm.operands[1].imm;
             }
         }
     }
 }
 
+void calc_call(cs_insn *insn, size_t count, IntVec& calls)
+{
+    for (size_t i = 0; i < count; i++) {
+        if (insn[i].id == ARM_INS_BL && insn[i].detail->arm.operands[0].type == ARM_OP_IMM) {
+            calls.push_back(i);
+        }
+        if (insn[i].id == ARM_INS_BLX && insn[i].detail->arm.operands[0].type == ARM_OP_REG) {
+            calls.push_back(i);
+        }
+        // tail jumpout
+        if (insn[i].id == ARM_INS_B && i == count - 1) {
+            calls.push_back(i);
+        }
+    }
+}
+
+size_t guess_func_size(csh handle, const uint8_t *code, size_t maxsize, uint32_t address)
+{
+    size_t funcsize = 0;
+    cs_insn* insn;
+    size_t count = cs_disasm(handle, code, maxsize, address, 0, &insn);
+    bool endonpop = false;
+    for (size_t i = 0; i < count; i++) {
+        if (insn[i].id == ARM_INS_PUSH && endonpop == false) {
+            for (uint8_t j = 0; j < insn[i].detail->arm.op_count; j++) {
+                if (insn[i].detail->arm.operands[j].reg == ARM_REG_LR) {
+                    endonpop = true;
+                    break;
+                }
+            }
+        }
+        bool hitted = false;
+        // quick n dirty
+        if (insn[i].id == ARM_INS_POP && endonpop) {
+            for (uint8_t j = 0; j < insn[i].detail->arm.op_count; j++) {
+                if (insn[i].detail->arm.operands[j].reg == ARM_REG_PC) {
+                    hitted = true;
+                    break;
+                }
+            }
+        }
+        if (insn[i].id == ARM_INS_BLX && endonpop == false && insn[i].detail->arm.operands[0].reg == ARM_REG_LR) {
+            hitted = true;
+        }
+        if (hitted) {
+            funcsize = (uint32_t)insn[i].address + insn[i].size - address;
+            break;
+        }
+    }
+    cs_free(insn, count);
+    return funcsize;
+}
