@@ -115,15 +115,6 @@ void printmismatch(const char* name, bool mismatch)
 
 int main(int argc, char * argv[])
 {
-//#ifdef _DEBUG
-//    if (IsDebuggerPresent()) {
-//        STARTUPINFOA si = {sizeof(si)}; PROCESS_INFORMATION pi = {};
-//        if (CreateProcessA(NULL,
-//            "\"F:\\Program Files\\SystemTools\\ConEmu5\\ConEmu\\ConEmuC.exe\" /AUTOATTACH",
-//            NULL, NULL, FALSE, NORMAL_PRIORITY_CLASS, NULL, NULL, &si, &pi))
-//        { CloseHandle(pi.hProcess); CloseHandle(pi.hThread); }
-//    }
-//#endif
     int mode = -1;
     char* payloadname = 0;
     char* payloadopt = 0;
@@ -627,7 +618,7 @@ char* base64_encode(const uint8_t* value, size_t valuelen)
 bool is_offical_bootloader(const void* btl)
 {
     bool matched = false;
-    bool pre2019 = (*(uint32_t*)btl + 1) == 0x1A0053E1;
+    bool pre2019 = *((uint32_t*)btl + 1) == 0x1A0053E1;
     const uint16_t blsize = pre2019?0x54F8:0x5D1C;
     char* buff = (char*)malloc(blsize);
     memcpy(buff, btl, blsize);
