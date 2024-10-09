@@ -470,6 +470,11 @@ int main(int argc, char * argv[])
     return 0;
 }
 
+bool read_emu_mem(uint32_t addr, void* buf, size_t size)
+{
+    return LinkKeeper::dumpFullFirmware(addr, size, buf);
+}
+
 uint16_t crc16_kermit(const uint8_t *buf, size_t len)
 {
     uint16_t crc = 0;

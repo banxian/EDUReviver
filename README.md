@@ -3,7 +3,7 @@ J-Link EDU Reviver
 
 使用方法
 --------
-从右侧[releases](https://github.com/banxian/EDUReviver/releases)页面下载最新[可执行文件包](https://github.com/banxian/EDUReviver/releases/download/v0.3.7-beta/EDUReviver_bin_b037.zip).
+从右侧[releases](https://github.com/banxian/EDUReviver/releases)页面下载最新[可执行文件包](https://github.com/banxian/EDUReviver/releases/download/v0.3.8-beta/EDUReviver_bin_b038.zip).
 解压所有文件到目录中, 进入目录在命令行下执行想要的命令
 
 EDUReViver -run blinky  
@@ -13,10 +13,10 @@ EDUReViver -run revive
 去除多余的FlashDL之类的Features.  
 
 EDUReViver -run swd  
-打开JLink电路板调试接口, 可以用来救砖.  
+打开JLink电路板上的调试接口, 可以用来救砖.  
 
 EDUReViver -run swd off  
-关闭JLink电路板调试接口.  
+关闭JLink电路板上的调试接口.  
 
 EDUReViver -run to11  
 转换V10/V12到V11. 重新插拔后, 打开jlink commander会自动刷新固件.  

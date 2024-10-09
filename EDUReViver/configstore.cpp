@@ -279,6 +279,7 @@ bool is_reg_add_imm(cs_insn * insn, int reg)
 }
 
 #define SESTASKMAINSIZE 0x2500
+extern bool read_emu_mem(uint32_t addr, void* buf, size_t size);
 
 const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
 {
@@ -457,6 +458,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
                             break;
                         }
                     }
+                    // 只解析到准备调用usbfunc的地方, 下面就是LDR和BLX了
                     if (cmdcnt && cmdtable) {
                         printf("g_usbcmds: %08X, count: %d\n", cmdtable, cmdcnt);
                         break;
@@ -464,7 +466,7 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
                 }
                 // lookup usbdfuncs table later
             }
-            // 跟踪出现的目的R4~R6赋值
+            // 跟踪taskmain函数中出现的目的R4~R6赋值
             const char* unknown = 0;
             if (arm->operands[0].type == ARM_OP_REG && arm->operands[0].reg >= ARM_REG_R4 && arm->operands[0].reg <= ARM_REG_R12) {
                 // 持续跟踪R4/R5/R6的MOVW/MOVT对值
@@ -513,7 +515,9 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
             cs_close(&handle);
             return NULL;
         }
+        // 后半部分指针从后数
         uint32_t cmde0func = reader.read_uint32_addr(cmdtable + (cmdcnt - 1 - (0xFF - 0xE0)) * 4);
+        uint32_t cmdfefunc = reader.read_uint32_addr(cmdtable + (cmdcnt - 1 - (0xFF - 0xFE)) * 4);
         size_t e0size = guess_func_size(handle, reader.buf_at_addr(cmde0func & ~1), 0x70, (cmde0func & ~1));
         printf("cmd_e0_fine_write_read: %08X, %X bytes\n", cmde0func, e0size);
         // 寻找usbrxbuf崩溃点, 5C
@@ -652,26 +656,45 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
             }
         }
         cs_free(insn, count);
-        // version, sp, lr, uxbrx, true, cmdReg, R4, R5, R6
-        if (rawCmdRegIdx >= 4 && rawCmdRegIdx <= 12) {
-            r456val[rawCmdRegIdx - 4] = cmdcnt + 0xE0;
-            r456dirty[rawCmdRegIdx - 4] = false;
-        }
-        bool fatal = false;
-        for (size_t i = 0; i < savedregs; i++) {
-            if (r456dirty[i]) {
-                errprintf("R%d val is bad!\n", 4 + i);
-                if (i != rawCmdRegIdx - 4) {
-                    fatal = true;
+        // 优先从CMD_READ_EMU_MEM处理函数里面抓R4~R9
+        bool userealreg = false;
+        uint32_t realregs[9];
+        count = cs_disasm(handle, reader.buf_at_addr(cmdfefunc & ~1), 4, (cmdfefunc & ~1), 1, &insn);
+        if (insn[0].id == ARM_INS_PUSH) {
+            cs_arm* arm = &insn[0].detail->arm;
+            if (arm->op_count > savedregs && arm->operands[arm->op_count-1].reg == ARM_REG_LR) {
+                uint32_t r4addr = taskstackinit + spd1 - arm->op_count * 4;
+                //printf("r4addr: 0x%08X\n", r4addr);
+                if (read_emu_mem(r4addr, realregs, savedregs * sizeof(uint32_t))) {
+                    userealreg = true;
                 }
             }
         }
-        if (fatal) {
-            cs_close(&handle);
-            return NULL;
+        cs_free(insn, count);
+        uint32_t* finalregs = userealreg?realregs:r456val;
+        // version, sp, lr, uxbrx, true, cmdReg, R4, R5, R6
+        if (rawCmdRegIdx >= 4 && rawCmdRegIdx <= 12) {
+            finalregs[rawCmdRegIdx - 4] = cmdcnt + 0xE0;
+            r456dirty[rawCmdRegIdx - 4] = false;
+        }
+        if (userealreg == false) {
+            bool fatal = false;
+            for (size_t i = 0; i < savedregs; i++) {
+                if (r456dirty[i]) {
+                    errprintf("R%d val is bad!\n", 4 + i);
+                    if (i != rawCmdRegIdx - 4) {
+                        fatal = true;
+                    }
+                }
+            }
+            if (fatal) {
+                cs_close(&handle);
+                return NULL;
+            }
         }
         patcher_config item = {argstack, dispatchlr, usbrxbuf, true, (char)savedregs};
-        memcpy(item.regs, r456val, sizeof(uint32_t)*savedregs);
+        memcpy(item.regs, finalregs, savedregs * sizeof(uint32_t));
+        item.endgap = endgap;
         add_user_config(reader.get_banner(), &item);
     }
     // IAR固件?
