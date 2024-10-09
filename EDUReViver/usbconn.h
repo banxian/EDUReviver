@@ -95,7 +95,7 @@ public:
     static bool commandReadFirmwareVersion(void* dataBuffer);
     static bool loopReadFirmwareVersion(void* dataBuffer);
     static bool commandReadEmulatorMemory(uint32_t address, uint32_t length, void* dataBuffer);
-    static bool commandSetEmulateOption(uint32_t option, uint32_t val, uint32_t* status);
+    static bool commandSetEmulatorOption(uint32_t option, uint32_t val, uint32_t* status);
     static bool commandSendUpdateFirmware(uint8_t* reply);
     static bool commandSendSelectInterface(uint8_t newif, uint32_t* oldif);
     static bool dumpFullFirmware(uint32_t addr, uint32_t size, void* buf);
@@ -131,7 +131,7 @@ bool jlinkContinueReadResult(JlinkDevice* dev, void* resultBuffer, uint32_t resu
 bool jlinkCommandReadFirmwareVersion(JlinkDevice* dev, void* dataBuffer);
 bool jlinkLoopReadFirmwareVersion(JlinkDevice* dev, void* dataBuffer);
 bool jlinkCommandReadEmulatorMemory(JlinkDevice* dev, uint32_t address, uint32_t length, void* dataBuffer);
-bool jlinkCommandSetEmulateOption(JlinkDevice* dev, uint32_t option, uint32_t val, uint32_t* status);
+bool jlinkCommandSetEmulatorOption(JlinkDevice* dev, uint32_t option, uint32_t val, uint32_t* status);
 bool jlinkCommandSendUpdateFirmware(JlinkDevice* dev, uint8_t* reply);
 bool jlinkCommandSendSelectInterface(JlinkDevice* dev, uint8_t newif, uint32_t* oldif);
 bool jlinkDumpFullFirmware(JlinkDevice* dev, uint32_t addr, uint32_t size, void* buf);

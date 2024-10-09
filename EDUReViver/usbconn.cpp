@@ -698,10 +698,10 @@ bool LinkKeeper::commandReadEmulatorMemory(uint32_t address, uint32_t length, vo
     return false;
 }
 
-bool LinkKeeper::commandSetEmulateOption(uint32_t option, uint32_t val, uint32_t* status)
+bool LinkKeeper::commandSetEmulatorOption(uint32_t option, uint32_t val, uint32_t* status)
 {
     if (JlinkDevice* dev = theKeeper->getCurrDevice()) {
-        return jlinkCommandSetEmulateOption(dev, option, val, status);
+        return jlinkCommandSetEmulatorOption(dev, option, val, status);
     }
     return false;
 }
@@ -973,7 +973,7 @@ bool jlinkCommandReadEmulatorMemory(JlinkDevice* dev, uint32_t address, uint32_t
     return jlinkSendCommand(dev, commandBuffer, sizeof(commandBuffer), dataBuffer, length);
 }
 
-bool jlinkCommandSetEmulateOption(JlinkDevice* dev, uint32_t option, uint32_t val, uint32_t* status)
+bool jlinkCommandSetEmulatorOption(JlinkDevice* dev, uint32_t option, uint32_t val, uint32_t* status)
 {
     uint8_t commandBuffer[17] =
     {
@@ -1005,16 +1005,14 @@ bool jlinkCommandSendSelectInterface(JlinkDevice* dev, uint8_t newif, uint32_t* 
 
 bool jlinkDumpFullFirmware(JlinkDevice* dev, uint32_t addr, uint32_t size, void* buf)
 {
-    // is reset handler zero?
     bool usexor = false;
-    uint32_t handler; // 2017 03 10 以后的固件读出为0或者dumper设置xor后结果
-    if (jlinkCommandReadEmulatorMemory(dev, addr + 4, 4, &handler) && (((handler >> 24) != (addr >> 24)) || handler == 0)) {
-        usexor = true;
-        uint32_t status = -1;
-        if (jlinkCommandSetEmulateOption(dev, 0x182, 0x55, &status)) {
-            if (status) {
-                printf("1st set option: 0x%08X\n", status);
-            }
+    uint32_t status = -1;
+    // status为0则成功=2017 03 10 以后的固件支持182子选项, 有xor加密
+    if (jlinkCommandSetEmulatorOption(dev, 0x182, 0x55, &status)) {
+        if (status) {
+            printf("1st set option: 0x%08X\n", status);
+        } else {
+            usexor = true;
         }
     }
     // 0x200 crash in 2023
@@ -1029,7 +1027,7 @@ bool jlinkDumpFullFirmware(JlinkDevice* dev, uint32_t addr, uint32_t size, void*
                         xorkey = *dw ^ 0xA5A5A5A5;
                     }
                 }
-                if (i) {
+                if (i != 0) {
                     printf("%d retries on 0x%08X.\n", i, addr);
                 }
                 break;
@@ -1041,7 +1039,7 @@ bool jlinkDumpFullFirmware(JlinkDevice* dev, uint32_t addr, uint32_t size, void*
     }
     if (usexor) {
         uint32_t status = -1;
-        if (jlinkCommandSetEmulateOption(dev, 0x182, 0, &status)) {
+        if (jlinkCommandSetEmulatorOption(dev, 0x182, 0, &status)) {
             if (status) {
                 printf("2nd set option: 0x%08X\n", status);
             }
