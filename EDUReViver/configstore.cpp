@@ -663,9 +663,8 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         if (insn[0].id == ARM_INS_PUSH) {
             cs_arm* arm = &insn[0].detail->arm;
             if (arm->op_count > savedregs && arm->operands[arm->op_count-1].reg == ARM_REG_LR) {
-                uint32_t r4addr = taskstackinit + spd1 - arm->op_count * 4;
-                //printf("r4addr: 0x%08X\n", r4addr);
-                if (read_emu_mem(r4addr, realregs, savedregs * sizeof(uint32_t))) {
+                uint32_t r456addr = taskstackinit + spd1 - arm->op_count * 4;
+                if (read_emu_mem(r456addr, realregs, savedregs * sizeof(uint32_t))) {
                     userealreg = true;
                 }
             }
@@ -675,14 +674,13 @@ const patcher_config* analyst_firmware_stack(const void* fwbuf, size_t fwlen)
         // version, sp, lr, uxbrx, true, cmdReg, R4, R5, R6
         if (rawCmdRegIdx >= 4 && rawCmdRegIdx <= 12) {
             finalregs[rawCmdRegIdx - 4] = cmdcnt + 0xE0;
-            r456dirty[rawCmdRegIdx - 4] = false;
         }
         if (userealreg == false) {
             bool fatal = false;
             for (size_t i = 0; i < savedregs; i++) {
                 if (r456dirty[i]) {
-                    errprintf("R%d val is bad!\n", 4 + i);
                     if (i != rawCmdRegIdx - 4) {
+                        errprintf("R%d val is bad!\n", 4 + i);
                         fatal = true;
                     }
                 }

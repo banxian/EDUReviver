@@ -219,7 +219,7 @@ int request_payload_online(int sn, const char* hash, const char* signature, cons
     int retcode = 0;
     char agent[64];
     DWORD dwVersion = GetVersion();
-    sprintf_s(agent, sizeof(agent), "EDUReViver/0.3.7 (Windows NT %d.%d)", (UCHAR)dwVersion, (UCHAR)(dwVersion >> 8));
+    sprintf_s(agent, sizeof(agent), "EDUReViver/0.3.8 (Windows NT %d.%d)", (UCHAR)dwVersion, (UCHAR)(dwVersion >> 8));
     HINTERNET internet = InternetOpenA(agent, 0, 0, 0, 0);
     if (internet) {
         bool havesni = os_have_sni();
