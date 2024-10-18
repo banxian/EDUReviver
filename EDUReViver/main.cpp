@@ -256,7 +256,7 @@ int main(int argc, char * argv[])
         CLOSE_AND_EXIT(0);
     }
     // 如补丁bootloader需要获取bootloader检查能否经受补丁, 如没有找到config还需要获取firmware
-    if (touchbl || config == 0) {
+    if (touchbl || config == NULL) {
         // dump bootloader/firmware and parse
         // TODO: bypass bootloader dump if not touchbl
         //uint32_t dumpaddr = touchbl?0x1A000000:0x1A008000;
@@ -286,8 +286,10 @@ int main(int argc, char * argv[])
             }
             CLOSE_AND_EXIT(0);
         }
-        printf("Your version number is not present in config cache! Analyst it now...\n");
-        config = analyst_firmware_stack(fwdump + 0x8000, 0x78000);
+        if (config == NULL) {
+            printf("Your version number is not present in config cache! Analyst it now...\n");
+            config = analyst_firmware_stack(fwdump + 0x8000, dumpsize - 0x8000); // 0x78000
+        }
         free(fwdump);
     } else if (touchcrp) {
         uint32_t crp;
@@ -459,6 +461,24 @@ int main(int argc, char * argv[])
         if (LinkKeeper::dumpFullFirmware(0x1A0002FC, 4, &crp)) {
             printf("new CRP Level: ");
             printCRPlevel(crp);
+        }
+    }
+    if (touchbl) {
+        char blver[4];
+        if (LinkKeeper::dumpFullFirmware(0x1A000138, 4, blver)) {
+            const char* tover = &payloadname[2];
+            if (memcmp(blver, tover, 2) == 0) {
+                printf("%s execute OK.\n", payloadname);
+
+                uint8_t reply;
+                if (LinkKeeper::commandSendUpdateFirmware(&reply) && reply == 1) {
+                    printf("Please launch J-Link Commander to perform a firmware update.\n");
+                } else {
+                    printf("Please unplug and replug the USB cable, then launch J-Link Commander.\n");
+                }
+            } else {
+                errprintf("%s execution failed!\n", payloadname);
+            }
         }
     }
 
